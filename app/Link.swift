@@ -164,8 +164,10 @@ final class Link {
         conn = nil
     }
 
-    /// The last two blocks sent, for the redundant copy (v4).
+    /// The last blocks sent, for the redundant copy. v5: eight back (40 ms), because Wi-Fi loses packets in bursts:
+    /// at two back only 145 of 474 lost blocks came back (14.11.2026), the rest were bursts of three or more.
     private var history: [(stamp: Int64, pcm: Data)] = []
+    static let redundancyDepth = 8
 
     /// One block of interleaved 16-bit stereo PCM. From the pump's thread. v4 (version 2 of the wire): the block from
     /// two packets back follows in μ-law, so one lost packet, or two in a row, is filled on the phone.
@@ -177,12 +179,12 @@ final class Link {
         d.append(2); d.append(2)
         d.be(UInt16(frames)); d.be(seq); d.be(sampleTime)
         d.append(pcm)
-        if history.count == 2, history[0].pcm.count == pcm.count {
+        if history.count == Link.redundancyDepth, history[0].pcm.count == pcm.count {
             d.be(history[0].stamp)
             d.append(Link.ulaw(history[0].pcm))
         }
         history.append((sampleTime, pcm))
-        if history.count > 2 { history.removeFirst() }
+        if history.count > Link.redundancyDepth { history.removeFirst() }
         seq &+= 1
         sampleTime += Int64(frames)
         sentPackets += 1
