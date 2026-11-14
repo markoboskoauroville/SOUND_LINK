@@ -137,7 +137,7 @@ final class Model: ObservableObject {
     private func startPump() {
         stopPump()
         capture.ring.clear()
-        let pump = Pump(capture)
+        let pump = Pump(capture, frames: link.current?.lan == false ? 160 : 240)
         pumping = true
         let link = self.link
         let t = Thread { [weak self] in
@@ -191,9 +191,9 @@ final class Model: ObservableObject {
             if Date().timeIntervalSince(lastLog) >= 5 {
                 lastLog = Date()
                 let r = report
-                Log.line(String(format: "[\(path)] sending %.1f s, %d packets, %d send errors | camera %@: %@, fill %d ms (target %d), rtt %.1f ms, latency ≈ %.0f ms, underruns %d, lost %d, late %d, skips %d, drift %d ppm",
+                Log.line(String(format: "[\(path)] sending %.1f s, %d packets, %d send errors | camera %@: %@, fill %d ms (target %d), rtt %.1f ms, latency ≈ %.0f ms, underruns %d, lost %d, recovered %d, concealed %d, late %d, skips %d, drift %d ppm",
                                 sentSeconds, link.sentPackets, link.sendErrors, r.phone, answering ? "receiving" : "NOT ANSWERING",
-                                r.fillMs, r.targetMs, r.rttMs, latencyMs, r.underruns, r.lost, r.late, r.skips, r.driftPpm))
+                                r.fillMs, r.targetMs, r.rttMs, latencyMs, r.underruns, r.lost, r.recovered, r.concealed, r.late, r.skips, r.driftPpm))
             }
         }
     }
@@ -211,7 +211,7 @@ final class Model: ObservableObject {
                 "sent_s": sentSeconds, "packets": link.sentPackets, "send_errors": link.sendErrors,
                 "phone": r.phone, "phone_state": ["waiting", "buffering", "playing"][min(2, max(0, r.state))],
                 "fill_ms": r.fillMs, "target_ms": r.targetMs, "rtt_ms": r.rttMs, "latency_ms": latencyMs,
-                "underruns": r.underruns, "lost": r.lost, "late": r.late, "skips": r.skips, "drift_ppm": r.driftPpm,
+                "underruns": r.underruns, "lost": r.lost, "recovered": r.recovered, "concealed": r.concealed, "late": r.late, "skips": r.skips, "drift_ppm": r.driftPpm,
                 "permissions_missing": Permissions.missing]
     }
 

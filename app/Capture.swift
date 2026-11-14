@@ -222,7 +222,8 @@ final class Capture {
 /// (5 ms) as interleaved 16-bit little-endian PCM.
 final class Pump {
     static let rate = 48_000.0
-    static let frames = 240
+    /// v4: 240 frames (5 ms) on the Wi-Fi, 160 over Tailscale, whose smaller MTU must hold the redundant copy too
+    let frames: Int
     private let capture: Capture
     private var converter: AVAudioConverter?
     private var inBuf: AVAudioPCMBuffer?
@@ -232,8 +233,9 @@ final class Pump {
     private var pendL: [Float] = []
     private var pendR: [Float] = []
 
-    init(_ c: Capture) {
+    init(_ c: Capture, frames: Int = 240) {
         capture = c
+        self.frames = frames
         if abs(c.rate - Pump.rate) > 0.5,
            let fi = AVAudioFormat(standardFormatWithSampleRate: c.rate, channels: 2),
            let fo = AVAudioFormat(standardFormatWithSampleRate: Pump.rate, channels: 2) {
@@ -270,7 +272,7 @@ final class Pump {
             }
         }
         var out: [Data] = []
-        let f = Pump.frames
+        let f = frames
         var at = 0
         while pendL.count - at >= f {
             var d = Data(count: f * 4)

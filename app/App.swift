@@ -8,7 +8,7 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
-let VERSION = 3
+let VERSION = 4
 let APP_NAME = "Sound Link (Mantra)"
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/SOUND_LINK/releases/latest")!
 
@@ -337,7 +337,7 @@ struct Numbers: View {
             cell("LATENCY", m.answering ? String(format: "%.0f ms", m.latencyMs) : "–")
             cell("BUFFER", "\(r.fillMs) / \(r.targetMs) ms")
             cell("DROPOUTS", "\(r.underruns)", r.underruns > 0 ? Ink.amber : Ink.text)
-            cell("LOST", "\(r.lost)", r.lost > 0 ? Ink.amber : Ink.text)
+            cell("LOST", "\(r.lost) / \(r.recovered) back", r.lost > r.recovered ? Ink.amber : Ink.text)
             cell("DRIFT", "\(r.driftPpm) ppm")
             cell("SENT", clock(m.sentSeconds))
         }

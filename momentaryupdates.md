@@ -11,3 +11,7 @@
 ## 14.11.2026 ~23:55, Wi-Fi first (word for word)
 
 "now the phones are on the same network, the phone and the laptop ... So you can now check if it goes through Tailscale or goes to Wi-Fi. Wi-Fi needs to have an advantage over Tailscale, and I guess Tailscale has more delay. I'm not sure. Let me know."
+
+## 14.11.2026 ~00:02, a decent buffer (word for word)
+
+"many dropouts when this is sending sound and lost packages. Can we build some decent buffer here"

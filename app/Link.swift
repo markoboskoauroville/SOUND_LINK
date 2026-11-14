@@ -23,6 +23,8 @@ struct Report {
     var skips = 0
     var phone = ""
     var id = ""
+    var recovered = 0
+    var concealed = 0
     var rttMs = 0.0
 }
 
@@ -140,7 +142,7 @@ final class Link {
         c.stateUpdateHandler = { st in Log.line("link to \(camera): \(st)") }
         c.start(queue: q)
         conn = c
-        seq = 0; sampleTime = 0; sentPackets = 0; sendErrors = 0; lastReportAt = nil; report = Report()
+        seq = 0; sampleTime = 0; sentPackets = 0; sendErrors = 0; lastReportAt = nil; report = Report(); history = []
         receive(c)
         let t = DispatchSource.makeTimerSource(queue: q)
         t.schedule(deadline: .now(), repeating: .milliseconds(250))
@@ -162,15 +164,25 @@ final class Link {
         conn = nil
     }
 
-    /// One packet of 240 frames of interleaved 16-bit stereo PCM. From the pump's thread.
+    /// The last two blocks sent, for the redundant copy (v4).
+    private var history: [(stamp: Int64, pcm: Data)] = []
+
+    /// One block of interleaved 16-bit stereo PCM. From the pump's thread. v4 (version 2 of the wire): the block from
+    /// two packets back follows in μ-law, so one lost packet, or two in a row, is filled on the phone.
     func send(pcm: Data) {
         guard let c = conn else { return }
         let frames = pcm.count / 4
-        var d = Data(capacity: 20 + pcm.count)
+        var d = Data(capacity: 28 + pcm.count + pcm.count / 2)
         d.append(contentsOf: Array("MSLA".utf8))
-        d.append(1); d.append(2)
+        d.append(2); d.append(2)
         d.be(UInt16(frames)); d.be(seq); d.be(sampleTime)
         d.append(pcm)
+        if history.count == 2, history[0].pcm.count == pcm.count {
+            d.be(history[0].stamp)
+            d.append(Link.ulaw(history[0].pcm))
+        }
+        history.append((sampleTime, pcm))
+        if history.count > 2 { history.removeFirst() }
         seq &+= 1
         sampleTime += Int64(frames)
         sentPackets += 1
@@ -216,6 +228,8 @@ final class Link {
         if at < d.count {                            // v210 phones: their id after the name
             let m = Int(d[d.startIndex + at]); at += 1
             if at + m <= d.count { r.id = String(decoding: d[d.startIndex + at ..< d.startIndex + at + m], as: UTF8.self) }
+            at += m
+            if at + 8 <= d.count { r.recovered = Int(d.u32(at)); r.concealed = Int(d.u32(at + 4)) }
         }
         r.rttMs = Double(Int64(Link.nowNs()) - echoed) / 1e6
         report = r
@@ -224,6 +238,29 @@ final class Link {
     }
 
     static func nowNs() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
+
+    /// G.711 μ-law of 16-bit little-endian PCM, one byte a sample (decoded by LinkJitter.ulawDecode on the phone).
+    static func ulaw(_ pcm: Data) -> Data {
+        var out = Data(count: pcm.count / 2)
+        pcm.withUnsafeBytes { raw in
+            let s = raw.bindMemory(to: Int16.self)
+            out.withUnsafeMutableBytes { o in
+                let ob = o.bindMemory(to: UInt8.self)
+                for i in 0..<s.count {
+                    var x = Int(Int16(littleEndian: s[i]))
+                    let sign = x < 0 ? 0x80 : 0
+                    if x < 0 { x = -x }
+                    if x > 32635 { x = 32635 }
+                    x += 0x84
+                    var exp = 7, mask = 0x4000
+                    while exp > 0 && (x & mask) == 0 { exp -= 1; mask >>= 1 }
+                    let mant = (x >> (exp + 3)) & 0x0f
+                    ob[i] = UInt8(~(sign | (exp << 4) | mant) & 0xff)
+                }
+            }
+        }
+        return out
+    }
 }
 
 extension Data {
