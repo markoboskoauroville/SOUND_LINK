@@ -19,6 +19,9 @@ final class Model: ObservableObject {
     @Published var report = Report()
     @Published var answering = false                // the camera answered within 1.5 s
     @Published var sentSeconds = 0.0
+    /// v2: checked every 2 s here (a timer inside the view was made again at every meter frame and never fired)
+    @Published var missing: [String] = Permissions.missing
+    private var ticks = 0
 
     let capture = Capture()
     let link = Link()
@@ -141,7 +144,14 @@ final class Model: ObservableObject {
 
     private func stopPump() { pumping = false; pumpThread = nil }
 
+    func checkPermissions() {
+        let now = Permissions.missing
+        if now != missing { missing = now; if now.isEmpty && !capture.running { openSource() } }
+    }
+
     private func tick() {
+        ticks += 1
+        if ticks % 60 == 0 { checkPermissions() }
         // the meter falls 20 dB a second, rises at once
         let fall: Float = 0.79
         levelL = max(capture.peakL, levelL * fall); capture.peakL = 0

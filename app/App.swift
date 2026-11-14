@@ -8,7 +8,7 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
-let VERSION = 1
+let VERSION = 2
 let APP_NAME = "Sound Link (Mantra)"
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/SOUND_LINK/releases/latest")!
 
@@ -39,6 +39,7 @@ enum Permissions {
     }
     static var missing: [String] { needed.filter { !allowed($0) } }
     static func open(_ p: String) {
+        Model.shared.checkPermissions()             // the click checks again (swift-apps.md, 1.11.2026)
         if allowed(p) { return }
         if p == "Microphone" && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             AVCaptureDevice.requestAccess(for: .audio) { ok in DispatchQueue.main.async { if ok { Model.shared.openSource() } } }
@@ -83,14 +84,13 @@ struct Word: View {
 // ---------------------------------------------------------------- the window
 struct Root: View {
     @ObservedObject var m: Model
-    @State private var missing = Permissions.missing
     let margin: CGFloat = 16
 
     var body: some View {
         GeometryReader { g in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
-                    TopRow(missing: missing)
+                    TopRow(missing: m.missing)
                     Hair()
                     SourceStep(m: m)
                     Hair()
@@ -110,10 +110,6 @@ struct Root: View {
         .background(Ink.ground)
         .frame(minWidth: 520, idealWidth: 640, maxWidth: .infinity, minHeight: 440, idealHeight: 520, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
-        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
-            let now = Permissions.missing
-            if now != missing { missing = now; if now.isEmpty { m.openSource() } }
-        }
     }
 }
 
