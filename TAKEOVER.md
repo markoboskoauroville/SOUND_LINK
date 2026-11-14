@@ -1,0 +1,42 @@
+# Sound Link (Mantra): TAKEOVER
+
+**What it is.** A Mac app that sends stereo sound from the Mac over the Wi-Fi into the Android app Manual Camera (Mantra)
+(repo markoboskoauroville/mantra-manual-camera, folder ~/Developer/MANTRA_NDI). Marko's case (14.11.2026): the camera in
+one corner, the Mac in the other, both on the same Wi-Fi, his XLR mixer (16 or 18 channels) on the Mac. He chooses the
+source and two of its channels, presses SEND, and the camera switches its sound to the Mac by itself; the take, GO LIVE
+(VDO.Ninja), NDI and the meters then carry the desk's sound. Public and unpromoted (repo-privacy.md): no README.
+
+- App: `/Applications/Sound Link (Mantra).app`, bundle id `community.auroville.soundlink`, signed "Mantra Apps".
+- Version: `let VERSION = N` in app/App.swift (whole numbers). Built only by GitHub Actions (.github/workflows/build.yml,
+  macos-15, swiftc via build.sh), release vN marked Latest with app.zip.
+- Asks to update at start (app/Updater.swift, kits/mac-updater).
+- Door (Star API functions): http://127.0.0.1:8974/fn/{status,devices,source,send,stop,permissions}, registered in
+  ~/.config/star-fns/sound-link.json.
+- Log: ~/Library/Logs/Sound Link (Mantra).log (every 5 s while sending: fill, rtt, latency, underruns, lost, late, drift).
+- Permissions: Microphone (amber PERMISSIONS top right while missing), Local Network (macOS asks once at the first browse).
+
+## The window (workflow-interface.md)
+1 SOURCE: the input device (menu) with the stereo meter beside it (two bars, small gap, no L R), and the pairs of its
+channels as pipes (1-2 | 3-4 | … | 17-18). 2 CAMERA: the Manual Camera phones found on the Wi-Fi, chosen by itself when
+there is one. 3 SEND / STOP (the round number is the button). While sending: LATENCY | BUFFER | DROPOUTS | LOST | DRIFT | SENT.
+
+## How it works
+- Capture (app/Capture.swift): a HAL output unit (AUHAL) on the chosen device, IO 256 frames, channel map = the pair, the
+  device's own rate (never changed); the pump converts to 48 kHz with AVAudioConverter when needed.
+- Discovery: Manual Camera registers `_mantrasound._udp` with Android NSD while it is open; the Mac browses with NWBrowser.
+- Transport (app/Link.swift, the wire written at its top): UDP, 48 kHz stereo 16-bit PCM, 240 frames (5 ms) per packet,
+  sequence number and sample time (RTP-like), service class interactiveVoice. A hello every 250 ms carries the Mac's name
+  and a ping; the phone answers each hello with its buffer, underruns, lost, late, drift and its name.
+- The phone's side (MANTRA_NDI LinkJitter.kt, MacLink.kt): adaptive jitter buffer (target 40 ms + 3 × jitter, up to
+  160 ms), one read cursor per consumer (the meter/take/NDI reader, and the GO LIVE WebRTC recorder), each resampled gently
+  (±4000 ppm at most) so the Mac clock never drifts against the phone's audio clock.
+
+## Test (no speakers): BlackHole 2ch
+    sox -n -t coreaudio "BlackHole 2ch" synth 130 sine 440 vol 0.1     # a tone into BlackHole, the Mac's output untouched
+    curl -s -XPOST 127.0.0.1:8974/fn/source -d '{"device":"BlackHole","pair":1}'
+    curl -s -XPOST 127.0.0.1:8974/fn/send -d '{}'; sleep 120; curl -s -XPOST 127.0.0.1:8974/fn/status
+
+## Install on the Mac (no compile)
+    gh release download --repo markoboskoauroville/SOUND_LINK --pattern app.zip -D /tmp/sl --clobber
+    ditto -x -k /tmp/sl/app.zip /tmp/sl/x && codesign --force -s "Mantra Apps" "/tmp/sl/x/Sound Link (Mantra).app"
+    then the swap of swift-apps.md (".tmp-" copy, mv old away, mv new in), and open -g.
