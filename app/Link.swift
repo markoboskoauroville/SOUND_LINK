@@ -61,6 +61,8 @@ final class Link {
     private(set) var sentPackets = 0
     private(set) var sendErrors = 0
     let macName = Host.current().localizedName ?? "Mac"
+    /// v6: the Mac's own share of the delay, µs: the input buffer, half a packet and the pump's poll (Model sets it).
+    var macSideUs: Int = 9000
 
     /// Called on the main queue: every way to every camera, the Wi-Fi ones first.
     var onCameras: (([Cam]) -> Void)?
@@ -199,6 +201,9 @@ final class Link {
         d.be(ping); d.be(Int64(Link.nowNs()))
         let name = Array(macName.utf8.prefix(60))
         d.append(UInt8(name.count)); d.append(contentsOf: name)
+        // v6 LIP-SYNC: the round trip measured from the last answer and the Mac's own delay, for the camera's timestamps
+        d.be(UInt32(max(0, min(Double(UInt32.max), report.rttMs * 1000))))
+        d.be(UInt32(macSideUs))
         c.send(content: d, completion: .idempotent)
     }
 

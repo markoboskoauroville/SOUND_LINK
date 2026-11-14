@@ -111,6 +111,7 @@ final class Model: ObservableObject {
         if let f = forcedPath, let w = link.ways(for: c.id).first(where: { $0.lan == (f == "wifi") }) { c = w }
         if !capture.running { openSource() }
         guard capture.running else { return }
+        link.macSideUs = Int(Double(capture.ioFrames) / capture.rate * 1e6) + 3500
         guard link.open(c) else { return }
         camera = c.name; cameraID = c.id; path = c.lan ? "Wi-Fi" : "Tailscale"
         let cam = c.name

@@ -52,3 +52,6 @@ there is one. 3 SEND / STOP (the round number is the button). While sending: LAT
 - v5: N = 8 (40 ms), because Wi-Fi loses packets in bursts.
 - The phone's buffer (v210): 150 ms on the Wi-Fi, 400 ms over Tailscale, plus 3 × jitter, plus 40 ms for each dropout
   (shrinks 1 ms every 5 s). Concealment repeats the block before at half level; dropouts fade.
+- v6 (15.11.2026, lip-sync): the hello also carries the round trip the Mac measured (µs, u32) and its own delay (input buffer
+  + half a packet + the poll, µs, u32) after the name. From v214 the camera stamps the take's sound earlier by
+  Mac delay + rtt/2 + its buffer.
