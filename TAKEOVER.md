@@ -40,3 +40,15 @@ there is one. 3 SEND / STOP (the round number is the button). While sending: LAT
     gh release download --repo markoboskoauroville/SOUND_LINK --pattern app.zip -D /tmp/sl --clobber
     ditto -x -k /tmp/sl/app.zip /tmp/sl/x && codesign --force -s "Mantra Apps" "/tmp/sl/x/Sound Link (Mantra).app"
     then the swap of swift-apps.md (".tmp-" copy, mv old away, mv new in), and open -g.
+
+## v3–v5 (15.11.2026)
+- v3: Tailscale. The Mac reads `tailscale status --json` every 15 s and sends a hello to each online peer on UDP 47474
+  every 3 s; a peer that answers is listed as "<host> · Tailscale". The same phone (its id from v210 in the Bonjour TXT
+  record and in each report, else its model) is one camera, Wi-Fi first. While sending, the Mac moves to the Wi-Fi way as
+  soon as it is there, and falls back to Tailscale when the Wi-Fi way is silent for 2.5 s. The door's `send` takes
+  `path: wifi|tailscale` to force one way for a measurement.
+- v4: wire version 2. Each packet carries the block from N packets back in μ-law after its own block: 240-frame blocks on
+  the Wi-Fi (1468 bytes, one Wi-Fi frame) and 160 over Tailscale (its MTU is 1280). The window shows LOST n / n back.
+- v5: N = 8 (40 ms), because Wi-Fi loses packets in bursts.
+- The phone's buffer (v210): 150 ms on the Wi-Fi, 400 ms over Tailscale, plus 3 × jitter, plus 40 ms for each dropout
+  (shrinks 1 ms every 5 s). Concealment repeats the block before at half level; dropouts fade.
