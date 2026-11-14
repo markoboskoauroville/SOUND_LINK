@@ -29,7 +29,7 @@ final class Door {
             "status": "{} the source, the camera, sending?, latency, buffer, dropouts, lost, drift",
             "devices": "{} the Mac's inputs and their channels",
             "source": "{device, pair} choose an input by part of its name and a pair (1 = 1-2); not remembered",
-            "send": "{camera?} send to the camera (the only one, or the one whose name contains the word)",
+            "send": "{camera?, path?} send to the camera (the only one, or the one whose name contains the word); path wifi|tailscale forces one way",
             "stop": "{} stop sending", "permissions": "{} missing permissions"]]
         if let d = try? JSONSerialization.data(withJSONObject: reg, options: [.prettyPrinted]) {
             try? d.write(to: URL(fileURLWithPath: dir + "/sound-link.json"))
@@ -85,8 +85,9 @@ final class Door {
                 guard let cam = m.cameras.first(where: { $0.lowercased().contains(want) }) else { return ["ok": false, "error": "no camera named \(want)", "cameras": m.cameras] }
                 m.chooseCamera(cam, remember: false)
             }
+            m.forcedPath = (a["path"] as? String)?.lowercased()     // "wifi" / "tailscale" for a measurement, else nil
             m.send()
-            return ["ok": m.sending, "camera": m.camera ?? "", "cameras": m.cameras]
+            return ["ok": m.sending, "camera": m.camera ?? "", "path": m.path, "cameras": m.cameras]
         case "stop":
             m.stop(); return ["ok": true]
         case "permissions":

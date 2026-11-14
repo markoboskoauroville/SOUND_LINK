@@ -8,7 +8,7 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
-let VERSION = 2
+let VERSION = 3
 let APP_NAME = "Sound Link (Mantra)"
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/SOUND_LINK/releases/latest")!
 
@@ -324,7 +324,7 @@ struct SendStep: View {
         if !m.sending { return m.capture.running ? (m.camera == nil && m.cameras.count != 1 ? "choose the camera" : "ready: \(m.pairName) of \(m.device?.name ?? "") to \(m.camera ?? m.cameras.first ?? "")") : "choose the source" }
         if !m.answering { return "sending · the camera is not answering yet" }
         let phase = m.report.state == 2 ? "camera receiving" : "camera buffering"
-        return "sending · \(phase) · \(m.report.phone)"
+        return "sending · \(phase) · \(m.report.phone) · \(m.path)"
     }
 }
 

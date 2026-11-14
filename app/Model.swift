@@ -13,8 +13,12 @@ final class Model: ObservableObject {
     @Published var levelL: Float = 0                // linear peak 0...1, for the meter
     @Published var levelR: Float = 0
     @Published var sourceProblem: String?
-    @Published var cameras: [String] = []
+    @Published var cameras: [String] = []           // names as listed: Wi-Fi first, then "<host> · Tailscale"
     @Published var camera: String?
+    private var cams: [Cam] = []
+    /// v3: the chosen phone, by its id (the same phone over Wi-Fi and over Tailscale is one choice)
+    private var cameraID: String?
+    @Published var path = ""                        // "Wi-Fi" or "Tailscale" while sending
     @Published var sending = false
     @Published var report = Report()
     @Published var answering = false                // the camera answered within 1.5 s
@@ -47,11 +51,11 @@ final class Model: ObservableObject {
         Devices.watch { [weak self] in self?.refreshDevices() }
         link.onCameras = { [weak self] names in
             guard let self = self else { return }
-            self.cameras = names
-            if self.camera == nil || !(names.contains(self.camera!)) {
-                if names.count == 1 { self.camera = names[0] }       // one camera: chosen by itself
-                else if !self.sending { self.camera = names.contains(self.camera ?? "") ? self.camera : nil }
-            }
+            self.cams = names
+            self.cameras = names.map(\.name)
+            if let id = self.cameraID, let c = names.first(where: { $0.id == id }) { self.camera = c.name }
+            else if names.count == 1 { self.camera = names[0].name; self.cameraID = names[0].id }   // one camera: chosen by itself
+            else if !self.sending { self.camera = nil }
         }
         link.onReport = { [weak self] r in self?.report = r }
         link.browse()
@@ -82,6 +86,7 @@ final class Model: ObservableObject {
 
     func chooseCamera(_ name: String, remember r: Bool = true) {
         camera = name
+        cameraID = cams.first { $0.name == name }?.id
         if r { UserDefaults.standard.set(name, forKey: "camera") }
         if sending { stop(); send() }
     }
@@ -97,13 +102,18 @@ final class Model: ObservableObject {
 
     // ---------------------------------------------------------------- 3 SEND / STOP
 
+    /// A test may force one way ("wifi" / "tailscale") for a measurement; nil follows Wi-Fi first.
+    var forcedPath: String?
+
     func send() {
         guard !sending else { return }
-        guard let cam = camera ?? (cameras.count == 1 ? cameras[0] : nil) else { return }
+        guard var c = cams.first(where: { $0.name == camera }) ?? (cams.count == 1 ? cams[0] : nil) else { return }
+        if let f = forcedPath, let w = link.ways(for: c.id).first(where: { $0.lan == (f == "wifi") }) { c = w }
         if !capture.running { openSource() }
         guard capture.running else { return }
-        guard link.open(cam) else { return }
-        camera = cam
+        guard link.open(c) else { return }
+        camera = c.name; cameraID = c.id; path = c.lan ? "Wi-Fi" : "Tailscale"
+        let cam = c.name
         sending = true
         started = Date()
         answering = false
@@ -149,9 +159,28 @@ final class Model: ObservableObject {
         if now != missing { missing = now; if now.isEmpty && !capture.running { openSource() } }
     }
 
+    /// v3 (Marko, 14.11.2026: "Wi-Fi needs to have an advantage over Tailscale"): while sending, the Wi-Fi way is
+    /// used whenever the phone is found on the Wi-Fi; Tailscale only when the Wi-Fi way is gone (or stops answering).
+    private func followPath() {
+        guard sending, forcedPath == nil, let id = cameraID, let cur = link.current else { return }
+        let ways = link.ways(for: id)
+        let silent = link.lastReportAt.map { Date().timeIntervalSince($0) > 2.5 } ?? (Date().timeIntervalSince(started ?? Date()) > 3)
+        var next: Cam?
+        if !cur.lan, let w = ways.first(where: { $0.lan }) { next = w }                       // Wi-Fi came back
+        else if cur.lan && silent, let t = ways.first(where: { !$0.lan }) { next = t }         // Wi-Fi way gone
+        guard let n = next, n != cur else { return }
+        Log.line("path: \(cur.lan ? "Wi-Fi" : "Tailscale") → \(n.lan ? "Wi-Fi" : "Tailscale") (\(n.name))")
+        stopPump()
+        _ = link.open(n)
+        camera = n.name; path = n.lan ? "Wi-Fi" : "Tailscale"
+        started = Date()
+        startPump()
+    }
+
     private func tick() {
         ticks += 1
         if ticks % 60 == 0 { checkPermissions() }
+        if ticks % 30 == 0 { followPath() }
         // the meter falls 20 dB a second, rises at once
         let fall: Float = 0.79
         levelL = max(capture.peakL, levelL * fall); capture.peakL = 0
@@ -162,7 +191,7 @@ final class Model: ObservableObject {
             if Date().timeIntervalSince(lastLog) >= 5 {
                 lastLog = Date()
                 let r = report
-                Log.line(String(format: "sending %.1f s, %d packets, %d send errors | camera %@: %@, fill %d ms (target %d), rtt %.1f ms, latency ≈ %.0f ms, underruns %d, lost %d, late %d, skips %d, drift %d ppm",
+                Log.line(String(format: "[\(path)] sending %.1f s, %d packets, %d send errors | camera %@: %@, fill %d ms (target %d), rtt %.1f ms, latency ≈ %.0f ms, underruns %d, lost %d, late %d, skips %d, drift %d ppm",
                                 sentSeconds, link.sentPackets, link.sendErrors, r.phone, answering ? "receiving" : "NOT ANSWERING",
                                 r.fillMs, r.targetMs, r.rttMs, latencyMs, r.underruns, r.lost, r.late, r.skips, r.driftPpm))
             }
@@ -178,7 +207,7 @@ final class Model: ObservableObject {
         let r = report
         return ["ok": true, "version": VERSION, "device": device?.name ?? "", "channels": pairName, "rate": capture.rate,
                 "capturing": capture.running, "source_problem": sourceProblem ?? "", "level_db": [db(levelL), db(levelR)],
-                "cameras": cameras, "camera": camera ?? "", "sending": sending, "answering": answering,
+                "cameras": cameras, "camera": camera ?? "", "sending": sending, "answering": answering, "path": path,
                 "sent_s": sentSeconds, "packets": link.sentPackets, "send_errors": link.sendErrors,
                 "phone": r.phone, "phone_state": ["waiting", "buffering", "playing"][min(2, max(0, r.state))],
                 "fill_ms": r.fillMs, "target_ms": r.targetMs, "rtt_ms": r.rttMs, "latency_ms": latencyMs,

@@ -22,7 +22,23 @@ struct Report {
     var packets = 0
     var skips = 0
     var phone = ""
+    var id = ""
     var rttMs = 0.0
+}
+
+/// One way to one phone: over the Wi-Fi (Bonjour) or over Tailscale (probed on port 47474). `id` is the phone's
+/// own (ANDROID_ID from v210, else its model), so the same phone found both ways is one camera, the Wi-Fi first.
+struct Cam: Equatable {
+    let name: String
+    let id: String
+    let lan: Bool
+    let endpoint: NWEndpoint
+    static func model(_ s: String) -> String {
+        var m = s
+        for p in ["Manual Camera (", "Manual Camera · "] where m.hasPrefix(p) { m = String(m.dropFirst(p.count)) }
+        if m.hasSuffix(")") { m.removeLast() }
+        return m
+    }
 }
 
 final class Link {
@@ -30,7 +46,10 @@ final class Link {
     private let q = DispatchQueue(label: "link", qos: .userInteractive)
     private var browser: NWBrowser?
     private var conn: NWConnection?
-    private var endpoints: [String: NWEndpoint] = [:]
+    private var lanCams: [String: Cam] = [:]
+    private var tsCams: [String: (cam: Cam, seen: Date)] = [:]
+    let probe = TailscaleProbe()
+    static let port: UInt16 = 47474
     private var hello: DispatchSourceTimer?
     private var ping: UInt32 = 0
     private var seq: UInt32 = 0
@@ -41,33 +60,80 @@ final class Link {
     private(set) var sendErrors = 0
     let macName = Host.current().localizedName ?? "Mac"
 
-    /// Called on the main queue: the names of the cameras found (sorted).
-    var onCameras: (([String]) -> Void)?
+    /// Called on the main queue: every way to every camera, the Wi-Fi ones first.
+    var onCameras: (([Cam]) -> Void)?
+
+    /// The cameras as the window lists them: Wi-Fi first; a Tailscale way only for a phone not found on the Wi-Fi.
+    func all() -> [Cam] {
+        let lan = lanCams.values.sorted { $0.name < $1.name }
+        let ids = Set(lan.map(\.id))
+        let ts = tsCams.values.filter { Date().timeIntervalSince($0.seen) < 10 }.map(\.cam)
+            .filter { !ids.contains($0.id) }.sorted { $0.name < $1.name }
+        return lan + ts
+    }
+    /// Every way, the twins included (for falling back to Tailscale when the Wi-Fi way goes).
+    func ways(for id: String) -> [Cam] {
+        let lan = lanCams.values.filter { $0.id == id }
+        let ts = tsCams.values.filter { $0.cam.id == id && Date().timeIntervalSince($0.seen) < 10 }.map(\.cam)
+        return lan + ts
+    }
+    private func publish() { let c = all(); DispatchQueue.main.async { self.onCameras?(c) } }
     /// Called on the main queue for every answer from the camera.
     var onReport: ((Report) -> Void)?
 
     func browse() {
         guard browser == nil else { return }
-        let b = NWBrowser(for: .bonjour(type: Link.type, domain: nil), using: .udp)
+        let b = NWBrowser(for: .bonjourWithTXTRecord(type: Link.type, domain: nil), using: .udp)
         b.browseResultsChangedHandler = { [weak self] results, _ in
             guard let self = self else { return }
-            var found: [String: NWEndpoint] = [:]
+            var found: [String: Cam] = [:]
             for r in results {
-                if case let .service(name, _, _, _) = r.endpoint, found[name] == nil { found[name] = r.endpoint }
+                guard case let .service(name, _, _, _) = r.endpoint, found[name] == nil else { continue }
+                var id = Cam.model(name)
+                if case let .bonjour(txt) = r.metadata, let v = txt["id"], !v.isEmpty { id = v }
+                found[name] = Cam(name: name, id: id, lan: true, endpoint: r.endpoint)
             }
-            self.endpoints = found
-            let names = found.keys.sorted()
-            DispatchQueue.main.async { self.onCameras?(names) }
+            self.lanCams = found
+            Log.line("Wi-Fi cameras: \(found.keys.sorted())")
+            self.publish()
         }
         b.stateUpdateHandler = { st in Log.line("browser: \(st)") }
         b.start(queue: q)
         browser = b
+        probe.onFound = { [weak self] ip, host, phone, id, rtt in
+            guard let self = self else { return }
+            self.q.async {
+                let key = id.isEmpty ? Cam.model(phone) : id
+                let cam = Cam(name: "\(host) · Tailscale", id: key, lan: false,
+                              endpoint: .hostPort(host: NWEndpoint.Host(ip), port: NWEndpoint.Port(rawValue: Link.port)!))
+                let isNew = self.tsCams[ip] == nil
+                self.tsCams[ip] = (cam, Date())
+                if isNew { Log.line(String(format: "Tailscale camera: %@ at %@ (probe rtt %.0f ms)", cam.name, ip, rtt)); self.publish() }
+            }
+        }
+        probe.start()
+        // a Tailscale way that stops answering leaves the list
+        let t = DispatchSource.makeTimerSource(queue: q)
+        t.schedule(deadline: .now() + 5, repeating: .seconds(5))
+        t.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let before = self.tsCams.count
+            self.tsCams = self.tsCams.filter { Date().timeIntervalSince($0.value.seen) < 10 }
+            if self.tsCams.count != before { self.publish() }
+        }
+        t.resume()
+        expiry = t
     }
+    private var expiry: DispatchSourceTimer?
+    /// The way being used now.
+    private(set) var current: Cam?
 
     /// Opens the way to `camera` and starts the hellos. Audio follows with `send`.
-    func open(_ camera: String) -> Bool {
+    func open(_ cam: Cam) -> Bool {
         close(sayBye: false)
-        guard let ep = q.sync(execute: { endpoints[camera] }) else { return false }
+        let ep = cam.endpoint
+        let camera = cam.name
+        current = cam
         let params = NWParameters.udp
         params.serviceClass = .interactiveVoice     // Wi-Fi WMM voice queue: the lowest delay the radio offers
         let c = NWConnection(to: ep, using: params)
@@ -146,6 +212,11 @@ final class Link {
         r.skips = Int(d.u32(at)); at += 4
         let n = Int(d[d.startIndex + at]); at += 1
         if at + n <= d.count { r.phone = String(decoding: d[d.startIndex + at ..< d.startIndex + at + n], as: UTF8.self) }
+        at += n
+        if at < d.count {                            // v210 phones: their id after the name
+            let m = Int(d[d.startIndex + at]); at += 1
+            if at + m <= d.count { r.id = String(decoding: d[d.startIndex + at ..< d.startIndex + at + m], as: UTF8.self) }
+        }
         r.rttMs = Double(Int64(Link.nowNs()) - echoed) / 1e6
         report = r
         lastReportAt = Date()
@@ -175,6 +246,82 @@ enum Log {
             let l = Data("\(t) \(s)\n".utf8)
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(l); try? h.close() }
             else { try? l.write(to: url) }
+        }
+    }
+}
+
+/// Finds Manual Camera over Tailscale, where Bonjour does not reach: every 3 s a hello to each online peer on port
+/// 47474 (`tailscale status --json`, read every 15 s); a peer that answers with "MSLR" is a camera.
+final class TailscaleProbe {
+    /// (ip, Tailscale host name, the phone's name, its id, round trip in ms), from the probe's thread.
+    var onFound: ((String, String, String, String, Double) -> Void)?
+    private var peers: [(ip: String, host: String)] = []
+    private var fd: Int32 = -1
+    static let cli = ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/usr/local/bin/tailscale"]
+        .first { FileManager.default.isExecutableFile(atPath: $0) }
+
+    func start() {
+        guard fd < 0, TailscaleProbe.cli != nil else { Log.line("tailscale: no CLI, Tailscale ways are not looked for"); return }
+        fd = socket(AF_INET, SOCK_DGRAM, 0)
+        guard fd >= 0 else { return }
+        var tv = timeval(tv_sec: 0, tv_usec: 300_000)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        let t = Thread { [weak self] in self?.loop() }
+        t.name = "tailscale-probe"; t.start()
+    }
+
+    private func readPeers() {
+        guard let cli = TailscaleProbe.cli else { return }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: cli); p.arguments = ["status", "--json"]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
+        guard let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let peer = j["Peer"] as? [String: [String: Any]] else { return }
+        peers = peer.values.compactMap { v in
+            guard (v["Online"] as? Bool) == true, let ips = v["TailscaleIPs"] as? [String],
+                  let ip = ips.first(where: { !$0.contains(":") }) else { return nil }
+            return (ip, v["HostName"] as? String ?? ip)
+        }
+    }
+
+    private func loop() {
+        var lastPeers = Date.distantPast, lastSend = Date.distantPast
+        var buf = [UInt8](repeating: 0, count: 2048)
+        while true {
+            if Date().timeIntervalSince(lastPeers) > 15 { readPeers(); lastPeers = Date() }
+            if Date().timeIntervalSince(lastSend) > 3 {
+                lastSend = Date()
+                var d = Data("MSLH".utf8); d.append(1); d.be(UInt32(0)); d.be(Int64(Link.nowNs()))
+                let name = Array("probe".utf8); d.append(UInt8(name.count)); d.append(contentsOf: name)
+                for p in peers {
+                    var a = sockaddr_in(); a.sin_family = sa_family_t(AF_INET); a.sin_port = Link.port.bigEndian
+                    inet_pton(AF_INET, p.ip, &a.sin_addr)
+                    d.withUnsafeBytes { raw in
+                        withUnsafePointer(to: &a) { ap in
+                            ap.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                                _ = sendto(fd, raw.baseAddress, raw.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                            }
+                        }
+                    }
+                }
+            }
+            var from = sockaddr_in(); var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let n = withUnsafeMutablePointer(to: &from) { fp in
+                fp.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in buf.withUnsafeMutableBytes { recvfrom(fd, $0.baseAddress, $0.count, 0, sa, &len) } }
+            }
+            guard n >= 47, buf[0] == 0x4D, buf[1] == 0x53, buf[2] == 0x4C, buf[3] == 0x52 else { continue }
+            let d = Data(buf[0..<n])
+            var ipb = [CChar](repeating: 0, count: 64)
+            inet_ntop(AF_INET, &from.sin_addr, &ipb, 64)
+            let ip = String(cString: ipb)
+            let echoed = d.i64(14)
+            let rtt = Double(Int64(Link.nowNs()) - echoed) / 1e6
+            let nl = Int(d[46]); var phone = "", id = ""
+            if 47 + nl <= n { phone = String(decoding: d[47..<(47 + nl)], as: UTF8.self) }
+            if 47 + nl < n { let m = Int(d[47 + nl]); if 48 + nl + m <= n { id = String(decoding: d[(48 + nl)..<(48 + nl + m)], as: UTF8.self) } }
+            let host = peers.first { $0.ip == ip }?.host ?? ip
+            onFound?(ip, host, phone, id, rtt)
         }
     }
 }
