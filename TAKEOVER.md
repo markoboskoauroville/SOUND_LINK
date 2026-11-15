@@ -69,3 +69,20 @@ Marko: "maybe Mac can stream, why phone should stream? ... make this sound link 
 - Proven 15.11.2026 with the test source: 50 s, speed 0.998x, 4.3 Mbit/s out, the VM ladder live, the gear playing every level.
 - Not yet proven: the real Pixel NDI into studio.py (the Pixel was off the Mac's Wi-Fi and its NDI off), the mixer, A/V sync.
 - Next: a Swift app "Studio (Mantra)" around studio.py (numbered workflow 1 CAMERA, 2 SOUND, 3 GO LIVE), built on GitHub.
+
+## v8 (15.11.2026): 2 PICTURE and 4 STREAM inside the app
+Marko: "build receiver in soundlink". Workflow now 1 SOURCE · 2 PICTURE · 3 SEND (the phone chosen inside it) · 4 STREAM.
+- PICTURE (app/Picture.swift): the NDI runtime of NDI Tools (/usr/local/lib/libndi.dylib, or NDI_RUNTIME_DIR_V6) loaded by dlopen;
+  the calls are declared by us in app/ndi_min.h (build.sh: -import-objc-header). No SDK file in this public repo or in the app.
+  The private repo mantra-ndi-sdk holds only the Android Advanced SDK (arm64 .so, "Not for redistribution"), so no token or secret
+  is needed. Finder every 2 s (Bonjour; door `picture {extra_ips}` for Tailscale), the Manual Camera source chosen by itself when it is
+  the only one, decoded UYVY frames (the standard runtime decodes HX; compressed passthrough would need the Advanced SDK on the Mac),
+  a 240 px preview at 4 fps, motion = mean luma difference between previews (0 = frozen). Info.plist Bonjour: _ndi._tcp.
+- STREAM: the newest frame at 25 fps by the Mac's clock (black before the first) into ffmpeg (Homebrew) with the chosen device and pair:
+  h264_videotoolbox 1080p25 5 Mbit/s GOP 2 s + aac_at 160 CBR stereo, RTMP to rtmp://100.102.86.30:1935/studio/master (UserDefaults
+  streamTo). Restarts on a drop. go_live (door) / streamGoLive (defaults) = GO/STOP on the band site as the camera "Mac Studio".
+- Door: `picture {source?, extra_ips?}`, `stream {action: start|stop, go_live?, seconds?, to?}`.
+- Built green: https://github.com/markoboskoauroville/SOUND_LINK/actions/runs/43680233093 (release v8 Latest). Not yet installed on the
+  Mac: v7 was SENDING to the Pixel for another worker's audio measurement (since 05:47), so the swap waits. NOT YET PROVEN in the app:
+  NDI receive, the preview moving, the master reaching the VM.
+- The `--shot` render is blank (ImageRenderer cannot draw the ScrollView/GeometryReader window): screenshots need the real window.

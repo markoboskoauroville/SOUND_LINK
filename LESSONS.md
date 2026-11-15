@@ -19,3 +19,5 @@
 - An NDI test sender fed by ffmpeg without `-re` ran at 378 % CPU and starved discovery ("none seen"): always pace test sources.
 - Homebrew ffmpeg here has no drawtext and no libsrt; it has the whip muxer, rtmp(s), h264_videotoolbox and aac_at.
 - avfoundation and the rawvideo pipe both follow the Mac's clock: pace the frames by time.monotonic(), let aresample=async fix the sound.
+- (v8) An NDI receiver needs no SDK files: dlopen the installed runtime and declare the few structs yourself; the build stays public.
+- (v8) Writing frames to ffmpeg's stdin from Swift: ignore SIGPIPE and use write(2), never FileHandle.write (it raises and kills the app).
