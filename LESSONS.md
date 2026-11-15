@@ -33,3 +33,15 @@
 
 ## 15.11.2026: device names
 - Device names come from Marko: MacBook Pro (his laptop), Pixel 7, Nothing Phone. Never invent product names ("Mac Studio" was invented and he does not own one).
+
+## 15.11.2026: v10, the NDI review
+- Ask UYVY_BGRA and handle BGRA too: the runtime gives BGRA whenever the sender's FourCC has alpha (BGRA, UYVA); BGRX and
+  NV12 come out as UYVY. Skipping non-UYVY frames silently made Meditation Room invisible to us.
+- Connect by name. A cached p_url_address is a snapshot of one network; the name is resolved again by the runtime.
+- The frame sync replaces the "latest frame" variable: pull it at the output clock and the SDK does repeat/drop and audio resampling.
+  Pull it from ONE clock at a time (the stream's, else the preview's), never two.
+- ffmpeg with two pipe inputs (rawvideo + f32le) deadlocks after two frames if one thread writes both: its demuxers wait
+  for each other. Each pipe needs its own writer thread with a short queue.
+- "No new frame" is not a stall when the connection is up and the source sends on change (still scenes, screen captures):
+  judge a gap by how the source sent before it (steady at >= 60 % of its declared rate, with its sound going on).
+- macOS has no `timeout`; for bounded test runs: `perl -e 'alarm N; exec @ARGV' cmd ...`. zsh does not split `$var` (use `${=var}`).

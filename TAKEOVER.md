@@ -98,3 +98,29 @@ Marko: "build receiver in soundlink". Workflow now 1 SOURCE · 2 PICTURE · 3 SE
 ## v9 (15.11.2026): the camera is named MacBook Pro
 Marko: "what is Mac Studio? ... call it MacBook Pro, and I don't have this thing at all." Only the label changed (studio.py, Picture.swift):
 the paired camera at /admin is now "MacBook Pro" (the token file is unchanged; re-pair under the new name if the site lists the old one).
+
+## v10 (15.11.2026): mac23's NDI review fixes (MANTRA_MANIFEST modules/ndi-best-practice.md)
+- #1 formats: the receivers ask UYVY_BGRA; the runtime then hands UYVY, or BGRA for sources with alpha (Meditation Room sends
+  BGRA). UYVY/UYVA are used as they are (UYVA: the UYVY plane), BGRA/BGRX/RGBA/RGBX are converted to UYVY, BT.709 video range:
+  vImage (vImageConvert_ARGB8888To422CbYpCrYp8) in Picture.swift, numpy fixed point in studio/ndi.py `to_uyvy` (1080p ~37 ms,
+  720p ~9 ms). Any other FourCC is logged once ("FourCC X is not converted, its frames are skipped"). Measured: with UYVY_BGRA the
+  runtime itself turns BGRX and NV12 into UYVY and UYVA into BGRA, so only UYVY and BGRA reach us in practice.
+- #6 by name: the receiver connects with p_ndi_name only; the URL is shown but used only for an address typed by hand
+  (door `picture {url: "ip:port", source?}`, studio.py `--ndi-url`). Log: "PICTURE: <name> by name, frame sync at 25 fps".
+- #8 frame sync: NDIlib_framesync_create on the receiver; STREAM pulls `framesync_capture_video` at its own 25 fps clock
+  (Picture.pull(); studio.py Frames.pull()), the frame sync repeats or drops; Picture's own 25 fps clock pulls only while STREAM
+  does not. The source's own NDI sound is drained through `framesync_capture_audio` at the same clock (app: level only,
+  `ndi_sound_db`; studio.py `--audio ndi` sends it into the master through a second pipe).
+- #9 static vs stall: the app's picture state is live / static (connected, no new frame for 2 s: a send-on-change source) /
+  lost (no connection); the STREAM line says "picture static (the source sends on change)". ndi_probe.py (in MANTRA_NDI
+  scripts/, repo mantra-manual-camera) says STATIC instead of PICTURE STALL for such sources (see its header; `--static`, `--stall-ms`).
+- Names: our NDI receiver names are "Sound Link" and "Studio" (no parentheses); ndi_testsend.py refuses a name with them.
+- Tests without data: `studio.py --to null` encodes and throws away (no network); `ndi_testsend.py` has `--fourcc BGRA|BGRX|UYVA|NV12`,
+  `--size`, `--on-change N`, `--tone`, `--stop-video-after N`. The app's STREAM was tested into a local listener
+  (`ffmpeg -listen 1 -f flv -i rtmp://127.0.0.1:19350/live/test -f null -`); the door's `to` is remembered in UserDefaults
+  `streamTo`, so delete it afterwards (`defaults delete community.auroville.soundlink streamTo`).
+- Built green: https://github.com/markoboskoauroville/SOUND_LINK/actions/runs/43719210195 (release v10 Latest). Installed
+  15.11.2026 14:30 (Sound Link was not running; downloaded, signed "Mantra Apps", ".tmp-" swap, open -g, window shows v10, quit again).
+- Proven with test sources (Python and app): BGRA 1280x720 live 25 fps with correct colours, -23 dBFS NDI tone through the frame
+  sync; STREAM 10 s to the local listener 244 frames; a source with one frame every 8 s shows "static". Not yet: Meditation Room
+  itself (it was not running) and the Pixel's NDI.
