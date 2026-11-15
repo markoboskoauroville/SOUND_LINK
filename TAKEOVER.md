@@ -82,9 +82,11 @@ Marko: "build receiver in soundlink". Workflow now 1 SOURCE · 2 PICTURE · 3 SE
   h264_videotoolbox 1080p25 5 Mbit/s GOP 2 s + aac_at 160 CBR stereo, RTMP to rtmp://100.102.86.30:1935/studio/master (UserDefaults
   streamTo). Restarts on a drop. go_live (door) / streamGoLive (defaults) = GO/STOP on the band site as the camera "Mac Studio".
 - Door: `picture {source?, extra_ips?}`, `stream {action: start|stop, go_live?, seconds?, to?}`.
-- Built green: https://github.com/markoboskoauroville/SOUND_LINK/actions/runs/43680233093 (release v8 Latest). Not yet installed on the
-  Mac: v7 was SENDING to the Pixel for another worker's audio measurement (since 05:47), so the swap waits. NOT YET PROVEN in the app:
-  NDI receive, the preview moving, the master reaching the VM.
+- Built green: https://github.com/markoboskoauroville/SOUND_LINK/actions/runs/43680233093 (release v8 Latest, contains v7's pump fix).
+  Installed 06:25 (v7 quit by AX OFF, swap, open -g; SEND to the Pixel restored with BlackHole 1-2 after 18 s; the phone showed
+  "MAC LINK 165 ms"). Proven 06:26 with the NDI test source: PICTURE 1920x1080 at 25 fps, motion 2.3-2.8 (moving); STREAM 30 s:
+  725 frames, speed 1x, 3.9-4.3 Mbit/s, the VM ladder live (1080p25 High, health live), VM ladder ~85 % of one core; the SEND
+  to the Pixel went on (1 underrun, 1 lost in those 30 s). Not yet: the Pixel's own NDI (its NDI was off), the mixer.
 - The `--shot` render is blank (ImageRenderer cannot draw the ScrollView/GeometryReader window): screenshots need the real window.
 
 ## v7 (15.11.2026, audio fix)
