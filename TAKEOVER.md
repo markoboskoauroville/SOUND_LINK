@@ -86,3 +86,9 @@ Marko: "build receiver in soundlink". Workflow now 1 SOURCE · 2 PICTURE · 3 SE
   Mac: v7 was SENDING to the Pixel for another worker's audio measurement (since 05:47), so the swap waits. NOT YET PROVEN in the app:
   NDI receive, the preview moving, the master reaching the VM.
 - The `--shot` render is blank (ImageRenderer cannot draw the ScrollView/GeometryReader window): screenshots need the real window.
+
+## v7 (15.11.2026, audio fix)
+- Pump under a latency-critical activity, App Nap off (Info.plist NSAppSleepDisabled), hold-ups over 60 ms logged ("pump: held up").
+- Installed on the Mac 15.11.2026 05:47 (gh release download v7, signed "Mantra Apps"); SEND from BlackHole 2ch 1-2 over the Wi-Fi.
+- Measured with the camera v216: 0 dropouts and no arrival gap over 141 ms in 22 min (before: a 240–740 ms hole every 2–4 min).
+- Open: BlackHole 2ch device volume 70.6 % (−18.8 dB) lowers everything in the stream; Marko decides whether it goes to 100 %.

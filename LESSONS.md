@@ -21,3 +21,12 @@
 - avfoundation and the rawvideo pipe both follow the Mac's clock: pace the frames by time.monotonic(), let aresample=async fix the sound.
 - (v8) An NDI receiver needs no SDK files: dlopen the installed runtime and declare the few structs yourself; the build stays public.
 - (v8) Writing frames to ffmpeg's stdin from Swift: ignore SIGPIPE and use write(2), never FileHandle.write (it raises and kills the app).
+
+## 15.11.2026: drops on the way to the camera
+- The camera heard holes of 0.2–0.7 s every 2–4 minutes with no packet lost, while ping to the phone stayed under 70 ms. Since v7
+  (pump thread under `beginActivity(.userInitiated, .latencyCritical)`, `NSAppSleepDisabled` in Info.plist) the camera saw no gap
+  over 141 ms in 22 minutes. The log now says "pump: held up N times in 10 s, the longest X ms" whenever the pump waits >60 ms.
+- **Gain:** BlackHole 2ch's own device volume was at 0.706 = −18.8 dB (BlackHole maps the scalar linearly to −64..0 dB). A −12 dBFS
+  test tone arrived at −30.8 dBFS everywhere. Whatever plays into BlackHole is that much lower in the stream; read the device
+  volume (CoreAudio 'volm') before blaming the link. Not changed without Marko.
+- Test signals go into BlackHole directly: `sox -q test.wav -t coreaudio "BlackHole 2ch"`; the default output (ADAM) is untouched.
