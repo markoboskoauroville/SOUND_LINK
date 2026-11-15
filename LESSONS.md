@@ -13,3 +13,9 @@
    0.4–0.6 s of buffer for zero dropouts. Over the Wi-Fi 0.15–0.18 s is enough.
 6. (15.11.2026) The phone answered from an IPv6 link-local address over the Wi-Fi (Bonjour resolved it that way). Any
    check of the path by address must handle IPv6 as well (the phone treats only 100.64/10 as Tailscale).
+
+## 15.11.2026: Studio
+- libndi works from Python ctypes on the Mac (structs: source_t, recv_create_v3_t, video_frame_v2_t): no compiled receiver needed.
+- An NDI test sender fed by ffmpeg without `-re` ran at 378 % CPU and starved discovery ("none seen"): always pace test sources.
+- Homebrew ffmpeg here has no drawtext and no libsrt; it has the whip muxer, rtmp(s), h264_videotoolbox and aac_at.
+- avfoundation and the rawvideo pipe both follow the Mac's clock: pace the frames by time.monotonic(), let aresample=async fix the sound.

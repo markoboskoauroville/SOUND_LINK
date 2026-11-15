@@ -55,3 +55,17 @@ there is one. 3 SEND / STOP (the round number is the button). While sending: LAT
 - v6 (15.11.2026, lip-sync): the hello also carries the round trip the Mac measured (µs, u32) and its own delay (input buffer
   + half a packet + the poll, µs, u32) after the name. From v214 the camera stamps the take's sound earlier by
   Mac delay + rtt/2 + its buffer.
+
+## 15.11.2026: Studio, the Mac as the encoder (studio/)
+Marko: "maybe Mac can stream, why phone should stream? ... make this sound link also picture link." Python, no compiling:
+- `studio/ndi.py`: libndi (/usr/local/lib/libndi.dylib, NDI Tools) through ctypes: find sources, receive UYVY frames.
+- `studio/studio.py`: Manual Camera's NDI HX (Picture Link) + the mixer (avfoundation; Sound Link's device and pair when it runs,
+  else `--audio "<name>" --pair N`) -> ffmpeg: h264_videotoolbox 1080p25 5 Mbit/s GOP 2 s + aac_at 160 kbit/s CBR stereo -> RTMP
+  over Tailscale to chromium-vm `studio-ladder`. Frames are paced at 25 fps by the Mac's clock (a frozen last frame if the camera
+  stalls, black before the first). A camera size other than 1920x1080 is letterboxed (numpy). Restarts the master on a drop.
+  `--av-offset-ms` for the clap test, `--seconds N` for short SIM tests, `--go-live` = GO/STOP on the band site as the paired camera
+  "Mac Studio" (token in ~/.config/studio/camera-token, chmod 600; pair it at /admin → PAIR CAMERA). `--list` shows sources/devices.
+- `studio/ndi_testsend.py`: an NDI test source "STUDIO TEST" (testsrc2), `studio.py --test` uses it with a 440/660 Hz tone.
+- Proven 15.11.2026 with the test source: 50 s, speed 0.998x, 4.3 Mbit/s out, the VM ladder live, the gear playing every level.
+- Not yet proven: the real Pixel NDI into studio.py (the Pixel was off the Mac's Wi-Fi and its NDI off), the mixer, A/V sync.
+- Next: a Swift app "Studio (Mantra)" around studio.py (numbered workflow 1 CAMERA, 2 SOUND, 3 GO LIVE), built on GitHub.
