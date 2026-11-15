@@ -64,7 +64,7 @@ Marko: "maybe Mac can stream, why phone should stream? ... make this sound link 
   over Tailscale to chromium-vm `studio-ladder`. Frames are paced at 25 fps by the Mac's clock (a frozen last frame if the camera
   stalls, black before the first). A camera size other than 1920x1080 is letterboxed (numpy). Restarts the master on a drop.
   `--av-offset-ms` for the clap test, `--seconds N` for short SIM tests, `--go-live` = GO/STOP on the band site as the paired camera
-  "Mac Studio" (token in ~/.config/studio/camera-token, chmod 600; pair it at /admin → PAIR CAMERA). `--list` shows sources/devices.
+  "MacBook Pro" (token in ~/.config/studio/camera-token, chmod 600; pair it at /admin → PAIR CAMERA). `--list` shows sources/devices.
 - `studio/ndi_testsend.py`: an NDI test source "STUDIO TEST" (testsrc2), `studio.py --test` uses it with a 440/660 Hz tone.
 - Proven 15.11.2026 with the test source: 50 s, speed 0.998x, 4.3 Mbit/s out, the VM ladder live, the gear playing every level.
 - Not yet proven: the real Pixel NDI into studio.py (the Pixel was off the Mac's Wi-Fi and its NDI off), the mixer, A/V sync.
@@ -80,7 +80,7 @@ Marko: "build receiver in soundlink". Workflow now 1 SOURCE · 2 PICTURE · 3 SE
   a 240 px preview at 4 fps, motion = mean luma difference between previews (0 = frozen). Info.plist Bonjour: _ndi._tcp.
 - STREAM: the newest frame at 25 fps by the Mac's clock (black before the first) into ffmpeg (Homebrew) with the chosen device and pair:
   h264_videotoolbox 1080p25 5 Mbit/s GOP 2 s + aac_at 160 CBR stereo, RTMP to rtmp://100.102.86.30:1935/studio/master (UserDefaults
-  streamTo). Restarts on a drop. go_live (door) / streamGoLive (defaults) = GO/STOP on the band site as the camera "Mac Studio".
+  streamTo). Restarts on a drop. go_live (door) / streamGoLive (defaults) = GO/STOP on the band site as the camera "MacBook Pro".
 - Door: `picture {source?, extra_ips?}`, `stream {action: start|stop, go_live?, seconds?, to?}`.
 - Built green: https://github.com/markoboskoauroville/SOUND_LINK/actions/runs/43680233093 (release v8 Latest, contains v7's pump fix).
   Installed 06:25 (v7 quit by AX OFF, swap, open -g; SEND to the Pixel restored with BlackHole 1-2 after 18 s; the phone showed
@@ -94,3 +94,7 @@ Marko: "build receiver in soundlink". Workflow now 1 SOURCE · 2 PICTURE · 3 SE
 - Installed on the Mac 15.11.2026 05:47 (gh release download v7, signed "Mantra Apps"); SEND from BlackHole 2ch 1-2 over the Wi-Fi.
 - Measured with the camera v216: 0 dropouts and no arrival gap over 141 ms in 22 min (before: a 240–740 ms hole every 2–4 min).
 - Open: BlackHole 2ch device volume 70.6 % (−18.8 dB) lowers everything in the stream; Marko decides whether it goes to 100 %.
+
+## v9 (15.11.2026): the camera is named MacBook Pro
+Marko: "what is Mac Studio? ... call it MacBook Pro, and I don't have this thing at all." Only the label changed (studio.py, Picture.swift):
+the paired camera at /admin is now "MacBook Pro" (the token file is unchanged; re-pair under the new name if the site lists the old one).

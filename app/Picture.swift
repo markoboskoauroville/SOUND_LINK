@@ -327,10 +327,10 @@ final class Streamer {
 
     func stop() { stopping = true; proc?.terminate() }
 
-    /// GO / STOP on the band site as the paired camera "Mac Studio", via "studio" (the viewers get the ladder and the gear).
+    /// GO / STOP on the band site as the paired camera "MacBook Pro", via "studio" (the viewers get the ladder and the gear).
     private func site(_ action: String) {
         guard let tok = try? String(contentsOfFile: Streamer.tokenFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !tok.isEmpty else {
-            Log.line("SITE: no camera token in \(Streamer.tokenFile) (pair \"Mac Studio\" at /admin)"); return
+            Log.line("SITE: no camera token in \(Streamer.tokenFile) (pair \"MacBook Pro\" at /admin)"); return
         }
         var rq = URLRequest(url: URL(string: Streamer.site + "/api/live")!)
         rq.httpMethod = "POST"; rq.timeoutInterval = 10

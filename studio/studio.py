@@ -27,7 +27,7 @@ CACHE = os.path.expanduser("~/.cache/studio")
 DEFAULT_TO = "rtmp://100.102.86.30:1935/studio/master"   # chromium-vm's Tailscale address (studio-ladder)
 SOUND_LINK = "http://127.0.0.1:8974/fn/status"
 SITE = os.environ.get("STUDIO_SITE", "https://santoshi-band.pages.dev")
-TOKEN_FILE = os.path.expanduser("~/.config/studio/camera-token")   # the site's camera token for "Mac Studio" (chmod 600, never printed)
+TOKEN_FILE = os.path.expanduser("~/.config/studio/camera-token")   # the site's camera token for "MacBook Pro" (chmod 600, never printed)
 
 
 def log(*a):
@@ -48,11 +48,11 @@ def audio_devices():
 
 
 def site(action):
-    """GO / STOP the band site's live as the paired camera "Mac Studio" with via "studio" (viewers get the ladder and the gear)."""
+    """GO / STOP the band site's live as the paired camera "MacBook Pro" with via "studio" (viewers get the ladder and the gear)."""
     try:
         tok = open(TOKEN_FILE).read().strip()
     except OSError:
-        log("no camera token in", TOKEN_FILE, "- pair \"Mac Studio\" at /admin (PAIR CAMERA) and save the token there")
+        log("no camera token in", TOKEN_FILE, "- pair \"MacBook Pro\" at /admin (PAIR CAMERA) and save the token there")
         return None
     req = urllib.request.Request(SITE + "/api/live", method="POST", data=json.dumps({"action": action, "via": "studio"}).encode(),
                                  headers={"content-type": "application/json", "authorization": "Bearer " + tok})

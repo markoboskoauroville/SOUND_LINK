@@ -30,3 +30,6 @@
   test tone arrived at −30.8 dBFS everywhere. Whatever plays into BlackHole is that much lower in the stream; read the device
   volume (CoreAudio 'volm') before blaming the link. Not changed without Marko.
 - Test signals go into BlackHole directly: `sox -q test.wav -t coreaudio "BlackHole 2ch"`; the default output (ADAM) is untouched.
+
+## 15.11.2026: device names
+- Device names come from Marko: MacBook Pro (his laptop), Pixel 7, Nothing Phone. Never invent product names ("Mac Studio" was invented and he does not own one).
