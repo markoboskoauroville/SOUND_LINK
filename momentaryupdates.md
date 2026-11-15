@@ -15,3 +15,6 @@
 ## 14.11.2026 ~00:02, a decent buffer (word for word)
 
 "many dropouts when this is sending sound and lost packages. Can we build some decent buffer here"
+
+## 15.11.2026, fix the audio streaming: test signals through BlackHole, measure drops (Marko, word for word)
+"Please let's uh fix our audio streaming. You need to stop this application which is now running through Black Hole, which is my DJ app DJ Pro from algorithm quit it. And through Black Hole, please send oscillator different test signals and and measure the drops. You need to open the stream. You start the stream from the Pixel phone. Open the stream on the Mac in any browser of your choice, and record audio. And see if there are drops, jittering, whatever errors in audio, you work on fixing those, please."
