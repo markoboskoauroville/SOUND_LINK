@@ -141,8 +141,25 @@ final class Model: ObservableObject {
         let pump = Pump(capture, frames: link.current?.lan == false ? 160 : 240)
         pumping = true
         let link = self.link
+        // v7 (15.11.2026, Marko: "fix our audio streaming ... see if there are drops"): the camera heard a hole of 0.2 to
+        // 0.7 s every two to four minutes while a ping to the phone stayed under 70 ms, so the network was not stopping.
+        // The pump now runs under an activity that keeps App Nap and timer coalescing away from it, and says in the log
+        // when it was held up for more than 60 ms, so a stop on the Mac's side is seen at once.
         let t = Thread { [weak self] in
+            let token = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical, .idleSystemSleepDisabled],
+                                                              reason: "Sound Link sends audio")
+            defer { ProcessInfo.processInfo.endActivity(token) }
+            var last = DispatchTime.now().uptimeNanoseconds
+            var worst: UInt64 = 0, held = 0, since = last
             while self?.pumping == true {
+                let now = DispatchTime.now().uptimeNanoseconds
+                let gap = now - last
+                last = now
+                if gap > 60_000_000 { held += 1; worst = max(worst, gap) }
+                if now - since > 10_000_000_000 {
+                    if held > 0 { Log.line("pump: held up \(held) times in 10 s, the longest \(worst / 1_000_000) ms") }
+                    held = 0; worst = 0; since = now
+                }
                 for p in pump.packets() { link.send(pcm: p) }
                 usleep(2000)
             }

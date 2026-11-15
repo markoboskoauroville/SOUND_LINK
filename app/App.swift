@@ -8,7 +8,7 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
-let VERSION = 6
+let VERSION = 7
 let APP_NAME = "Sound Link (Mantra)"
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/SOUND_LINK/releases/latest")!
 

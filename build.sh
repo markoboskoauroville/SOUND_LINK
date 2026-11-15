@@ -23,6 +23,7 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>CFBundleShortVersionString</key><string>$V</string>
 <key>CFBundleVersion</key><string>$V</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSAppSleepDisabled</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSMicrophoneUsageDescription</key><string>Sound Link (Mantra) reads the two channels you choose (your mixer) and sends them to Manual Camera on the Wi-Fi. Nothing is recorded on the Mac.</string>
 <key>NSLocalNetworkUsageDescription</key><string>Sound Link (Mantra) finds Manual Camera on your Wi-Fi and sends it the sound.</string>
