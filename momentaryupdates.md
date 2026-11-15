@@ -30,3 +30,9 @@
 "so, Nii can send over NDI the picture to the Mac, but NDIHX will that and we have SDK from NDI original, it's right in a GitHub, and build receiver in soundlink"
 
 **Meaning (master):** the NDI HX receiver goes into the Sound Link (Mantra) Mac app itself (Swift), built with the official NDI SDK from the private repo mantra-ndi-sdk (fetched at build time, never committed here). Workflow 1 SOURCE (audio) · 2 PICTURE (NDI) · 3 SEND (to the phone) / STREAM (to Frankfurt). studio.py stays as the CLI fallback. Status (15.11.2026 ~06:20): v8 built green and released Latest (NDI runtime by dlopen, no SDK needed); installed 06:25 and proven with the NDI test source (PICTURE 25 fps moving, STREAM 30 s to the VM ladder at 1x); the Pixel's own NDI and the mixer are next.
+
+## 15.11.2026, "Mac Studio" is MacBook Pro (Marko, word for word)
+
+"what is Mac Studio? I don't understand. If you're referring to my laptop, then call it MacBook Pro, and I don't have this thing at all."
+
+**Meaning (master):** the camera/device label "Mac Studio" is renamed "MacBook Pro" everywhere (studio.py, Picture.swift, TAKEOVER, manifest, band site TAKEOVER). Version v9.
