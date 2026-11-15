@@ -4,11 +4,13 @@
 // Marko, 14.11.2026: "I'm choosing the source, and I press Send. When I press Send, my camera app automatically
 // switches the sound and puts the status text that it's receiving sound from the Mac."
 // The window is a workflow (MANTRA_MANIFEST workflow-interface.md): 1 SOURCE, 2 CAMERA, 3 SEND.
+// v8 (15.11.2026, the Studio route): 1 SOURCE · 2 PICTURE (NDI from Manual Camera) · 3 SEND (the sound to the phone, as before,
+// the phone chosen inside it) · 4 STREAM (one master, picture + the mixer, to the VM's quality ladder in Frankfurt).
 import SwiftUI
 import AppKit
 import AVFoundation
 
-let VERSION = 7
+let VERSION = 8
 let APP_NAME = "Sound Link (Mantra)"
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/SOUND_LINK/releases/latest")!
 
@@ -94,10 +96,12 @@ struct Root: View {
                     Hair()
                     SourceStep(m: m)
                     Hair()
-                    CameraStep(m: m)
+                    PictureStep(s: Studio.shared)
                     Hair()
                     SendStep(m: m)
                     if m.sending { Hair(); Numbers(m: m) }
+                    Hair()
+                    StreamStep(s: Studio.shared, m: m)
                     Hair()
                     Text("© 2026 Mantra Productions").font(.system(size: 10)).foregroundStyle(Ink.dim)
                         .frame(maxWidth: .infinity).padding(.top, 10)
@@ -108,7 +112,7 @@ struct Root: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         .background(Ink.ground)
-        .frame(minWidth: 520, idealWidth: 640, maxWidth: .infinity, minHeight: 440, idealHeight: 520, maxHeight: .infinity)
+        .frame(minWidth: 520, idealWidth: 640, maxWidth: .infinity, minHeight: 440, idealHeight: 640, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
     }
 }
@@ -315,6 +319,15 @@ struct SendStep: View {
         let can = m.sending || (m.capture.running && (m.camera != nil || m.cameras.count == 1))
         Step(n: 3, word: m.sending ? "STOP" : "SEND", enabled: can, lit: m.sending, id: "send",
              action: { m.sending ? m.stop() : m.send() }) {
+            if m.cameras.isEmpty {
+                Text("the sound to Manual Camera: looking for it on the Wi-Fi …")
+                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(Ink.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Pipes(items: m.cameras, chosen: m.camera.flatMap { m.cameras.firstIndex(of: $0) }, idPrefix: "cam") { i in
+                    m.chooseCamera(m.cameras[i])
+                }
+            }
             Text(line).font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundStyle(m.sending ? (m.answering ? Ink.green : Ink.amber) : Ink.dim)
                 .fixedSize(horizontal: false, vertical: true)
@@ -354,18 +367,64 @@ struct Numbers: View {
     func clock(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }
 }
 
+/// 2 PICTURE: the NDI sources on the Wi-Fi (Manual Camera sends NDI HX), the chosen one small and moving.
+struct PictureStep: View {
+    @ObservedObject var s: Studio
+    var body: some View {
+        Step(n: 2, word: "PICTURE", lit: s.preview != nil, id: "picture") {
+            if !s.picture.available {
+                Text("the NDI runtime is missing: install NDI Tools (ndi.video/tools), then open Sound Link again")
+                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(Ink.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if s.sources.isEmpty {
+                Text("looking for NDI on the Wi-Fi … in Manual Camera switch NDI on")
+                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(Ink.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Pipes(items: s.sources.map(\.name), chosen: s.chosen.flatMap { c in s.sources.firstIndex { $0.name == c } }, idPrefix: "ndi") { i in
+                    s.choose(s.sources[i].name)
+                }
+            }
+            if let img = s.preview {
+                HStack(alignment: .bottom, spacing: 10) {
+                    Image(nsImage: img).resizable().aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .frame(maxWidth: 240).overlay(Rectangle().stroke(Ink.line, lineWidth: 1))
+                        .accessibilityLabel("Picture preview")
+                    Text(s.previewLine).font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(Ink.dim)
+                }
+            }
+        }
+    }
+}
+
+/// 4 STREAM / STOP: one master (the picture + the pair of 1 SOURCE) to the VM's quality ladder.
+struct StreamStep: View {
+    @ObservedObject var s: Studio
+    @ObservedObject var m: Model
+    var body: some View {
+        let can = s.streaming || m.device != nil
+        Step(n: 4, word: s.streaming ? "STOP" : "STREAM", enabled: can, lit: s.streaming, id: "stream",
+             action: { s.streaming ? s.stopStream() : s.stream() }) {
+            Text(s.streamLine).font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(s.streaming ? Ink.green : Ink.dim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 // ---------------------------------------------------------------- the app
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         Log.line("start v\(VERSION)")
         Model.shared.begin()
+        Studio.shared.begin()
         Door.shared.start()
         for w in NSApp.windows where w.title.hasPrefix(APP_NAME) { w.setFrameAutosaveName("SoundLinkMain") }
         if CommandLine.arguments.contains("--login") { for w in NSApp.windows { w.orderOut(nil) } }
         Updater.checkAtStart()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ n: Notification) { Model.shared.stop() }
+    func applicationWillTerminate(_ n: Notification) { Model.shared.stop(); Studio.shared.stopStream() }
 }
 
 struct SoundLinkApp: App {
@@ -374,7 +433,7 @@ struct SoundLinkApp: App {
         Window(APP_NAME, id: "main") { Root(m: Model.shared) }
             .windowStyle(.hiddenTitleBar)
             .windowResizability(.contentMinSize)
-            .defaultSize(width: 640, height: 520)
+            .defaultSize(width: 640, height: 640)
     }
 }
 

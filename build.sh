@@ -8,7 +8,7 @@ NAME="Sound Link (Mantra)"
 ID="community.auroville.soundlink"
 APP="build/$NAME.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-swiftc -O -swift-version 5 -parse-as-library -target arm64-apple-macos14.0 -o "$APP/Contents/MacOS/SoundLink" app/*.swift
+swiftc -O -swift-version 5 -parse-as-library -target arm64-apple-macos14.0 -import-objc-header app/ndi_min.h -o "$APP/Contents/MacOS/SoundLink" app/*.swift
 [ -x "$APP/Contents/MacOS/SoundLink" ] || { echo "the app did not build"; exit 1; }
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,8 +26,8 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>NSAppSleepDisabled</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSMicrophoneUsageDescription</key><string>Sound Link (Mantra) reads the two channels you choose (your mixer) and sends them to Manual Camera on the Wi-Fi. Nothing is recorded on the Mac.</string>
-<key>NSLocalNetworkUsageDescription</key><string>Sound Link (Mantra) finds Manual Camera on your Wi-Fi and sends it the sound.</string>
-<key>NSBonjourServices</key><array><string>_mantrasound._udp</string></array>
+<key>NSLocalNetworkUsageDescription</key><string>Sound Link (Mantra) finds Manual Camera on your Wi-Fi, sends it the sound and receives its picture (NDI).</string>
+<key>NSBonjourServices</key><array><string>_mantrasound._udp</string><string>_ndi._tcp</string></array>
 </dict></plist>
 PL
 I=build/AppIcon.iconset; rm -rf $I; mkdir -p $I
