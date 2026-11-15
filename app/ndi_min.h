@@ -1,5 +1,6 @@
 // ndi_min.h: the few NDI runtime calls Sound Link uses, declared by us (the public NDI v5/v6 C ABI: the same layout as
-// NDIlib_source_t, NDIlib_find_create_t, NDIlib_recv_create_v3_t, NDIlib_video_frame_v2_t). No NDI SDK file is in this
+// NDIlib_source_t, NDIlib_find_create_t, NDIlib_recv_create_v3_t, NDIlib_video_frame_v2_t,
+// NDIlib_audio_frame_v2_t). No NDI SDK file is in this
 // public repository: the app loads the NDI runtime that NDI Tools installs (/usr/local/lib/libndi.dylib) with dlopen at
 // run time, so nothing of the SDK is compiled in, linked or redistributed. Picture Link, 15.11.2026.
 #include <stdint.h>
@@ -12,6 +13,10 @@ typedef struct {
     int xres, yres; uint32_t FourCC; int frame_rate_N, frame_rate_D; float picture_aspect_ratio; int frame_format_type;
     int64_t timecode; uint8_t* p_data; int line_stride_in_bytes; const char* p_metadata; int64_t timestamp;
 } SLNDIVideoFrameV2;
+typedef struct {
+    int sample_rate, no_channels, no_samples; int64_t timecode; float* p_data; int channel_stride_in_bytes;
+    const char* p_metadata; int64_t timestamp;
+} SLNDIAudioFrameV2;
 
 typedef bool (*SLNDI_initialize)(void);
 typedef void* (*SLNDI_find_create_v2)(const SLNDIFindCreate*);
@@ -23,3 +28,12 @@ typedef void* (*SLNDI_recv_create_v3)(const SLNDIRecvCreateV3*);
 typedef int (*SLNDI_recv_capture_v2)(void*, SLNDIVideoFrameV2*, void*, void*, uint32_t);
 typedef void (*SLNDI_recv_free_video_v2)(void*, const SLNDIVideoFrameV2*);
 typedef void (*SLNDI_recv_destroy)(void*);
+typedef int (*SLNDI_recv_get_no_connections)(void*);
+// the frame sync (NDI SDK "Frame Synchronization", as OBS DistroAV uses it): pulled at our own clock, it repeats or drops
+// frames and resamples the sound; the frame is empty (p_data NULL) until the first one arrived. field_type 1 = progressive.
+typedef void* (*SLNDI_framesync_create)(void*);
+typedef void (*SLNDI_framesync_destroy)(void*);
+typedef void (*SLNDI_framesync_capture_video)(void*, SLNDIVideoFrameV2*, int);
+typedef void (*SLNDI_framesync_free_video)(void*, SLNDIVideoFrameV2*);
+typedef void (*SLNDI_framesync_capture_audio)(void*, SLNDIAudioFrameV2*, int, int, int);
+typedef void (*SLNDI_framesync_free_audio)(void*, SLNDIAudioFrameV2*);

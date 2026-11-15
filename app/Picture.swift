@@ -1,16 +1,19 @@
 // Picture.swift: 2 PICTURE and 4 STREAM (v8, 15.11.2026). Marko: "so, Nii can send over NDI the picture to the Mac, but NDIHX
 // will that and we have SDK from NDI original ... and build receiver in soundlink" and "Mac can stream, why phone should stream?"
 //
-// PICTURE: the NDI sources on the Wi-Fi (Manual Camera sends NDI HX, H.264/HEVC); the NDI runtime decodes them and gives
-// UYVY frames, shown small in the window. The runtime is NDI Tools' libndi, loaded with dlopen (ndi_min.h): nothing of the
+// PICTURE: the NDI sources on the Wi-Fi (Manual Camera sends NDI HX, H.264/HEVC; Meditation Room sends BGRA); the NDI runtime
+// decodes them. v10 (mac23's NDI review, MANTRA_MANIFEST modules/ndi-best-practice.md): connected by NAME (#6), read through
+// the NDI frame sync at our own 25 fps clock (#8, as OBS DistroAV), UYVY/UYVA used as they are and BGRA/BGRX/RGBA/RGBX
+// converted with vImage (#1, any other FourCC logged once), a connected source without new frames is "static", not stalled (#9). The runtime is NDI Tools' libndi, loaded with dlopen (ndi_min.h): nothing of the
 // SDK is in this public repository or in the app.
-// STREAM: ONE master to the VM's quality ladder (vm-chromium/studio-stream): the picture paced at 25 fps by the Mac's clock +
+// STREAM: ONE master to the VM's quality ladder (vm-chromium/studio-stream): the frame sync pulled at 25 fps by the Mac's clock +
 // the chosen pair of the mixer, through ffmpeg (h264_videotoolbox 1080p25 5 Mbit/s GOP 2 s + aac_at 160 kbit/s CBR stereo) by
 // RTMP over Tailscale. The same job as studio/studio.py, which stays as the command-line fallback.
 import Foundation
 import AppKit
 import CoreImage
 import CoreVideo
+import Accelerate
 
 // ---------------------------------------------------------------- the NDI runtime
 final class NDIRuntime {
@@ -25,6 +28,13 @@ final class NDIRuntime {
     var recvCapture: SLNDI_recv_capture_v2!
     var recvFreeVideo: SLNDI_recv_free_video_v2!
     var recvDestroy: SLNDI_recv_destroy!
+    var recvConnections: SLNDI_recv_get_no_connections!
+    var fsCreate: SLNDI_framesync_create!
+    var fsDestroy: SLNDI_framesync_destroy!
+    var fsVideo: SLNDI_framesync_capture_video!
+    var fsFreeVideo: SLNDI_framesync_free_video!
+    var fsAudio: SLNDI_framesync_capture_audio!
+    var fsFreeAudio: SLNDI_framesync_free_audio!
 
     private init() {
         var dirs: [String] = []
@@ -42,10 +52,18 @@ final class NDIRuntime {
                   let rc = sym("NDIlib_recv_create_v3", SLNDI_recv_create_v3.self),
                   let rcap = sym("NDIlib_recv_capture_v2", SLNDI_recv_capture_v2.self),
                   let rfv = sym("NDIlib_recv_free_video_v2", SLNDI_recv_free_video_v2.self),
-                  let rd = sym("NDIlib_recv_destroy", SLNDI_recv_destroy.self) else { continue }
+                  let rd = sym("NDIlib_recv_destroy", SLNDI_recv_destroy.self),
+                  let rnc = sym("NDIlib_recv_get_no_connections", SLNDI_recv_get_no_connections.self),
+                  let fsc = sym("NDIlib_framesync_create", SLNDI_framesync_create.self),
+                  let fsd = sym("NDIlib_framesync_destroy", SLNDI_framesync_destroy.self),
+                  let fsv = sym("NDIlib_framesync_capture_video", SLNDI_framesync_capture_video.self),
+                  let fsfv = sym("NDIlib_framesync_free_video", SLNDI_framesync_free_video.self),
+                  let fsa = sym("NDIlib_framesync_capture_audio", SLNDI_framesync_capture_audio.self),
+                  let fsfa = sym("NDIlib_framesync_free_audio", SLNDI_framesync_free_audio.self) else { continue }
             guard ini() else { Log.line("NDI: \(p) refused to start"); continue }
             findCreate = fc; findWait = fw; findSources = fs; findDestroy = fd
-            recvCreate = rc; recvCapture = rcap; recvFreeVideo = rfv; recvDestroy = rd
+            recvCreate = rc; recvCapture = rcap; recvFreeVideo = rfv; recvDestroy = rd; recvConnections = rnc
+            fsCreate = fsc; fsDestroy = fsd; fsVideo = fsv; fsFreeVideo = fsfv; fsAudio = fsa; fsFreeAudio = fsfa
             loaded = true; path = p
             Log.line("NDI runtime: \(p)")
             return
@@ -55,28 +73,56 @@ final class NDIRuntime {
 }
 
 // ---------------------------------------------------------------- the picture
-struct NDISource: Hashable { let name: String; let url: String }
+/// A source is connected by its NAME (NDI review #6): the runtime finds it again through discovery, so a phone whose USB
+/// tether moved to another subnet is not lost. The URL is kept for display and used only for an address typed by hand.
+struct NDISource: Hashable {
+    let name: String; let url: String; var manual: Bool = false
+}
+
+/// One connection: the receiver and its frame sync, destroyed together under Picture's lock.
+private final class NDIConn {
+    let recv: UnsafeMutableRawPointer
+    let sync: UnsafeMutableRawPointer
+    var alive = true
+    init(recv: UnsafeMutableRawPointer, sync: UnsafeMutableRawPointer) { self.recv = recv; self.sync = sync }
+}
 
 final class Picture {
     static let W = 1920, H = 1080, FPS = 25
-    static let fourccUYVY: UInt32 = 0x5956_5955       // "UYVY" little-endian
+    static func fourcc(_ s: String) -> UInt32 { s.utf8.reversed().reduce(0) { $0 << 8 | UInt32($1) } }
+    static let fourccUYVY = fourcc("UYVY"), fourccUYVA = fourcc("UYVA")
+    static let fourccBGRA = fourcc("BGRA"), fourccBGRX = fourcc("BGRX"), fourccRGBA = fourcc("RGBA"), fourccRGBX = fourcc("RGBX")
+    static func name(_ f: UInt32) -> String {
+        let b = [UInt8(f & 0xff), UInt8(f >> 8 & 0xff), UInt8(f >> 16 & 0xff), UInt8(f >> 24)]
+        return b.allSatisfy({ $0 >= 32 && $0 < 127 }) ? String(decoding: b, as: UTF8.self) : String(format: "0x%08x", f)
+    }
 
     var onSources: (([NDISource]) -> Void)?
     var onPreview: ((NSImage?, String) -> Void)?
 
-    private let lock = NSLock()
-    private var latest: Data?                         // 1920x1080 UYVY, the newest frame
-    private(set) var frames = 0
+    private let lock = NSLock()                       // the connection, the frame sync and `latest`
+    private var conn: NDIConn?
+    private var latest: Data?                         // 1920x1080 UYVY, the frame the frame sync gave last
+    private var lastStamp: Int64 = .min
+    private var skipped = Set<UInt32>()
+    private(set) var frames = 0                       // new frames from the source
+    private(set) var repeats = 0                      // ticks where the frame sync gave the same frame again
     private(set) var size = ""
+    private(set) var format = ""
     private(set) var lastFrameAt = Date.distantPast
     private(set) var motion = 0.0                     // mean |Δ| of sampled luma between previews (0 = frozen)
-    private(set) var fps = 0.0
+    private(set) var fps = 0.0                        // new frames per second (the source's real rate)
+    private(set) var connections = 0
+    private(set) var ndiSoundDB = -120.0             // the source's own sound through the frame sync (shown, not sent)
     private var finderOn = false
-    private var receiver: UnsafeMutableRawPointer?
-    private var receiving = false
     private(set) var source: NDISource?
     private var lastSample: [UInt8] = []
+    private var lastPreview = Date.distantPast
+    private var fpsCount = 0, fpsT0 = Date()
+    private let previewQ = DispatchQueue(label: "ndi-preview", qos: .utility)
     private let ci = CIContext(options: [.cacheIntermediates: false])
+    /// true while STREAM pulls the frame sync at its own 25 fps clock; otherwise Picture's own clock pulls it.
+    var externalClock = false
     var extraIPs = ""
 
     var available: Bool { NDIRuntime.shared.loaded }
@@ -119,47 +165,122 @@ final class Picture {
     func connect(_ s: NDISource) {
         guard available else { return }
         disconnect()
-        source = s
         let rt = NDIRuntime.shared
-        let name = strdup(s.name), url = s.url.isEmpty ? nil : strdup(s.url), me = strdup("Sound Link (Mantra)")
-        var rc = SLNDIRecvCreateV3(source_to_connect_to: SLNDISource(p_ndi_name: UnsafePointer(name), p_url_address: url.map { UnsafePointer($0) }),
+        // by name; the URL only when it was typed by hand. No parentheses in our receiver's name (ndi-best-practice §1).
+        let name = s.name.isEmpty ? nil : strdup(s.name), url = (s.manual && !s.url.isEmpty) ? strdup(s.url) : nil, me = strdup("Sound Link")
+        var rc = SLNDIRecvCreateV3(source_to_connect_to: SLNDISource(p_ndi_name: name.map { UnsafePointer($0) }, p_url_address: url.map { UnsafePointer($0) }),
                                    color_format: 1 /* UYVY_BGRA */, bandwidth: 100 /* highest */, allow_video_fields: false,
                                    p_ndi_recv_name: UnsafePointer(me))
-        receiver = rt.recvCreate(&rc)
+        let r = rt.recvCreate(&rc)
         free(name); free(url); free(me)
-        guard let r = receiver else { Log.line("NDI: no receiver for \(s.name)"); return }
-        Log.line("PICTURE: \(s.name) \(s.url)")
-        receiving = true; frames = 0
+        guard let recv = r else { Log.line("NDI: no receiver for \(s.name)"); return }
+        guard let sync = rt.fsCreate(recv) else { rt.recvDestroy(recv); Log.line("NDI: no frame sync for \(s.name)"); return }
+        let c = NDIConn(recv: recv, sync: sync)
+        lock.lock()
+        conn = c; source = s; latest = nil; lastStamp = .min; frames = 0; repeats = 0; format = ""; size = ""
+        lastFrameAt = .distantPast; fpsCount = 0; fpsT0 = Date()
+        lock.unlock()
+        Log.line("PICTURE: \(s.name) " + (s.manual ? "at \(s.url) (typed by hand)" : "by name") + ", frame sync at \(Picture.FPS) fps")
+        // Picture's own clock: pulls the frame sync at 25 fps for the preview while STREAM does not (STREAM pulls it itself).
         let t = Thread { [weak self] in
-            var count = 0, t0 = Date(), lastPreview = Date.distantPast
-            while let self = self, self.receiving {
-                var v = SLNDIVideoFrameV2()
-                let kind = rt.recvCapture(r, &v, nil, nil, 500)
-                guard kind == 1 else { continue }                 // 1 = video
-                if v.FourCC == Picture.fourccUYVY, let p = v.p_data {
-                    let d = Picture.fit(p, Int(v.xres), Int(v.yres), Int(v.line_stride_in_bytes))
-                    self.lock.lock(); self.latest = d; self.lock.unlock()
-                    self.frames += 1; count += 1
-                    self.size = "\(v.xres)x\(v.yres)"; self.lastFrameAt = Date()
-                    if Date().timeIntervalSince(lastPreview) > 0.25 { lastPreview = Date(); self.preview(d) }
-                }
-                rt.recvFreeVideo(r, &v)
-                let el = Date().timeIntervalSince(t0)
-                if el >= 2 { self.fps = Double(count) / el; count = 0; t0 = Date() }
+            let t0 = Date(); var n = 0
+            while let self = self, c.alive {
+                n += 1
+                let due = t0.addingTimeInterval(Double(n) / Double(Picture.FPS))
+                let wait = due.timeIntervalSinceNow
+                if wait > 0 { Thread.sleep(forTimeInterval: wait) } else if wait < -1 { n = Int(-t0.timeIntervalSinceNow * Double(Picture.FPS)) }
+                if !self.externalClock { _ = self.pull() }
+                if n % Picture.FPS == 0 { self.connections = Int(c.alive ? rt.recvConnections(c.recv) : 0) }
             }
-            rt.recvDestroy(r)
+            let l = self?.lock
+            l?.lock()
+            rt.fsDestroy(c.sync); rt.recvDestroy(c.recv)      // the frame sync before its receiver
+            l?.unlock()
         }
-        t.name = "ndi-recv"; t.start()
+        t.name = "ndi-sync"; t.start()
     }
 
     func disconnect() {
-        receiving = false; receiver = nil; source = nil
-        lock.lock(); latest = nil; lock.unlock()
+        lock.lock(); conn?.alive = false; conn = nil; source = nil; latest = nil; lock.unlock()
         DispatchQueue.main.async { self.onPreview?(nil, "") }
     }
 
-    /// The newest frame (1920x1080 UYVY) or nil.
+    /// One tick of the output clock (NDI review #8): the frame the frame sync gives for now, as 1920x1080 UYVY, or nil
+    /// before the first frame. Called at 25 fps by STREAM while it runs, else by Picture's own clock. The frame sync repeats
+    /// the last frame when the source is slower or sends only on change, and drops frames when it is faster.
+    func pull() -> Data? {
+        let rt = NDIRuntime.shared
+        lock.lock(); defer { lock.unlock() }
+        guard let c = conn, c.alive else { return nil }
+        // the source's own sound: drained at this clock so the frame sync's queue stays short; its level is shown only
+        var a = SLNDIAudioFrameV2()
+        rt.fsAudio(c.sync, &a, 48000, 2, Int32(48000 / Picture.FPS))
+        if let p = a.p_data, a.no_samples > 0 {
+            var sum: Float = 0; vDSP_svesq(p, 1, &sum, vDSP_Length(a.no_samples))
+            ndiSoundDB = sum > 0 ? Double(10 * log10(sum / Float(a.no_samples))) : -120
+        }
+        rt.fsFreeAudio(c.sync, &a)
+        var v = SLNDIVideoFrameV2()
+        rt.fsVideo(c.sync, &v, 1 /* progressive */)
+        defer { rt.fsFreeVideo(c.sync, &v) }
+        guard let p = v.p_data, v.xres > 1, v.yres > 0 else { return latest }
+        let stamp = v.timestamp != 0 ? v.timestamp : v.timecode
+        if stamp == lastStamp, latest != nil { repeats += 1; return latest }
+        let w = Int(v.xres), h = Int(v.yres), stride = Int(v.line_stride_in_bytes), f = v.FourCC
+        let out: Data
+        switch f {
+        case Picture.fourccUYVY, Picture.fourccUYVA:       // UYVA: the UYVY plane first, then alpha (not needed)
+            out = Picture.fit(p, w, h, stride)
+        case Picture.fourccBGRA, Picture.fourccBGRX, Picture.fourccRGBA, Picture.fourccRGBX:
+            guard let u = Picture.rgbToUYVY(p, w, h, stride, bgr: f == Picture.fourccBGRA || f == Picture.fourccBGRX) else { return latest }
+            out = u.withUnsafeBytes { (b: UnsafeRawBufferPointer) in
+                Picture.fit(UnsafeMutablePointer(mutating: b.bindMemory(to: UInt8.self).baseAddress!), w / 2 * 2, h, w / 2 * 4)
+            }
+        default:
+            if !skipped.contains(f) { skipped.insert(f); Log.line("PICTURE: FourCC \(Picture.name(f)) is not converted, its frames are skipped") }
+            return latest
+        }
+        if Picture.name(f) != format {
+            format = Picture.name(f)
+            Log.line("PICTURE: \(w)x\(h) \(format)" + (f == Picture.fourccUYVY ? "" : ", converted to UYVY"))
+        }
+        lastStamp = stamp; latest = out
+        frames += 1; fpsCount += 1
+        size = "\(w)x\(h)"; lastFrameAt = Date()
+        let el = Date().timeIntervalSince(fpsT0)
+        if el >= 2 { fps = Double(fpsCount) / el; fpsCount = 0; fpsT0 = Date() }
+        if Date().timeIntervalSince(lastPreview) > 0.25 { lastPreview = Date(); previewQ.async { self.preview(out) } }
+        return out
+    }
+
+    /// The newest frame (1920x1080 UYVY) or nil, without pulling the frame sync.
     func frame() -> Data? { lock.lock(); defer { lock.unlock() }; return latest }
+
+    /// BGRA/BGRX/RGBA/RGBX into UYVY of the same size (width made even) with vImage: BT.709, video range (NDI review #1).
+    private static let info709: vImage_ARGBToYpCbCr? = {
+        var info = vImage_ARGBToYpCbCr()
+        var range = vImage_YpCbCrPixelRange(Yp_bias: 16, CbCr_bias: 128, YpRangeMax: 235, CbCrRangeMax: 240,
+                                            YpMax: 235, YpMin: 16, CbCrMax: 240, CbCrMin: 16)
+        let e = vImageConvert_ARGBToYpCbCr_GenerateConversion(kvImage_ARGBToYpCbCrMatrix_ITU_R_709_2, &range, &info,
+                                                              kvImageARGB8888, kvImage422CbYpCrYp8, vImage_Flags(kvImageNoFlags))
+        if e != kvImageNoError { Log.line("PICTURE: vImage conversion setup failed (\(e))"); return nil }
+        return info
+    }()
+
+    static func rgbToUYVY(_ p: UnsafeMutablePointer<UInt8>, _ w: Int, _ h: Int, _ stride: Int, bgr: Bool) -> Data? {
+        guard var info = info709 else { return nil }
+        let w2 = w / 2 * 2
+        var out = Data(count: w2 * h * 2)
+        let e: vImage_Error = out.withUnsafeMutableBytes { (o: UnsafeMutableRawBufferPointer) -> vImage_Error in
+            var src = vImage_Buffer(data: UnsafeMutableRawPointer(p), height: vImagePixelCount(h), width: vImagePixelCount(w2), rowBytes: stride)
+            var dst = vImage_Buffer(data: o.baseAddress!, height: vImagePixelCount(h), width: vImagePixelCount(w2), rowBytes: w2 * 2)
+            // permuteMap: where A, R, G, B sit in the source's 4 bytes
+            let map: [UInt8] = bgr ? [3, 2, 1, 0] : [3, 0, 1, 2]
+            return vImageConvert_ARGB8888To422CbYpCrYp8(&src, &dst, &info, map, vImage_Flags(kvImageNoFlags))
+        }
+        if e != kvImageNoError { Log.line("PICTURE: vImage conversion failed (\(e))"); return nil }
+        return out
+    }
 
     /// Any size into 1920x1080 UYVY: copied row by row when it is 1920x1080, else nearest-neighbour inside black bars.
     static func fit(_ p: UnsafeMutablePointer<UInt8>, _ w: Int, _ h: Int, _ rowBytes: Int) -> Data {
@@ -217,9 +338,18 @@ final class Picture {
         DispatchQueue.main.async { self.onPreview?(ns, line) }
     }
 
+    /// "live", "static" (connected, no new frame for 2 s: a source that sends only on change, NDI review #9), "lost"
+    /// (no connection) or "" (nothing chosen).
+    var state: String {
+        guard source != nil else { return "" }
+        if Date().timeIntervalSince(lastFrameAt) <= 2 { return "live" }
+        return connections > 0 ? "static" : "lost"
+    }
+
     func status() -> [String: Any] {
-        ["runtime": NDIRuntime.shared.path, "source": source?.name ?? "", "frames": frames, "size": size,
-         "fps": (fps * 10).rounded() / 10, "motion": (motion * 100).rounded() / 100,
+        ["runtime": NDIRuntime.shared.path, "source": source?.name ?? "", "frames": frames, "repeats": repeats, "size": size,
+         "format": format, "fps": (fps * 10).rounded() / 10, "motion": (motion * 100).rounded() / 100,
+         "connections": connections, "state": state, "ndi_sound_db": (ndiSoundDB * 10).rounded() / 10,
          "age_s": lastFrameAt == .distantPast ? -1 : (Date().timeIntervalSince(lastFrameAt) * 10).rounded() / 10]
     }
 }
@@ -254,8 +384,10 @@ final class Streamer {
         running = true; stopping = false; restarts = 0; framesOut = 0; problem = nil; startedAt = Date(); siteLive = false; wentGo = false
         signal(SIGPIPE, SIG_IGN)
         Log.line("STREAM to \(to): picture \(picture.source?.name ?? "none"), sound \(device) pair \(pair + 1), \(vk) kbit/s + AAC 160")
+        picture.externalClock = true
         let t = Thread { [weak self] in
             guard let self = self else { return }
+            defer { picture.externalClock = false }
             let end = seconds > 0 ? Date().addingTimeInterval(seconds) : Date.distantFuture
             let black: Data = { var d = Data(count: Picture.W * Picture.H * 2)
                 d.withUnsafeMutableBytes { b in let p = b.bindMemory(to: UInt8.self); for i in stride(from: 0, to: p.count, by: 4) { p[i] = 128; p[i+1] = 16; p[i+2] = 128; p[i+3] = 16 } }
@@ -292,7 +424,7 @@ final class Streamer {
                     let wait = due.timeIntervalSinceNow
                     if wait > 0 { Thread.sleep(forTimeInterval: wait) }
                     else if wait < -1 { n = Int(-t0.timeIntervalSinceNow * Double(Picture.FPS)) }
-                    let fr = picture.frame() ?? black
+                    let fr = picture.pull() ?? black          // the frame sync, at this clock
                     let ok = fr.withUnsafeBytes { (b: UnsafeRawBufferPointer) -> Bool in
                         var off = 0
                         while off < b.count {
@@ -395,6 +527,12 @@ final class Studio: ObservableObject {
         picture.connect(s)
     }
 
+    /// An address typed by hand (no discovery): the only case where the URL is used to connect.
+    func chooseManual(name: String, url: String) {
+        chosen = name.isEmpty ? url : name
+        picture.connect(NDISource(name: name, url: url, manual: true))
+    }
+
     func stream(goLive: Bool = UserDefaults.standard.bool(forKey: "streamGoLive"), seconds: Double = 0) {
         let m = Model.shared
         guard let dev = m.device else { streamLine = "choose the source (1) first"; return }
@@ -409,7 +547,13 @@ final class Studio: ObservableObject {
         streaming = streamer.running
         if let p = streamer.problem { streamLine = p; return }
         if streamer.running {
-            let pic = picture.source == nil ? "no picture (black)" : (Date().timeIntervalSince(picture.lastFrameAt) > 2 ? "picture stalled" : "picture live")
+            let pic: String
+            switch picture.state {
+            case "": pic = "no picture (black)"
+            case "static": pic = "picture static (the source sends on change)"
+            case "lost": pic = "picture lost (no connection)"
+            default: pic = "picture live"
+            }
             streamLine = "streaming · \(pic) · \(streamer.kbps.isEmpty ? "starting" : streamer.kbps) · speed \(streamer.speed)" +
                 (streamer.restarts > 0 ? " · \(streamer.restarts) restarts" : "") + (streamer.siteLive ? " · site LIVE" : "")
         } else {

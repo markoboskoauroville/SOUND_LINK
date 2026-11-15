@@ -5,7 +5,8 @@
 //   POST /fn/send          {camera?: "<part of the name>"}       3 SEND
 //   POST /fn/stop          {}                                    STOP
 //   POST /fn/permissions   {}
-//   POST /fn/picture       {source?: "<part of the name>", extra_ips?: "100.x,..."}   2 PICTURE (v8): the NDI sources, choose one
+//   POST /fn/picture       {source?: "<part of the name>", extra_ips?: "100.x,...", url?: "ip:port"}   2 PICTURE (v8): the NDI
+//                          sources, choose one; connected by name (v10), url only for an address typed by hand
 //   POST /fn/stream        {action: "start"|"stop", go_live?: bool, seconds?: N, to?: "rtmp://..."}   4 STREAM (v8)
 // Registered in ~/.config/star-fns/sound-link.json, so `star fn "sound link" status` reaches it.
 import Foundation
@@ -33,7 +34,7 @@ final class Door {
             "source": "{device, pair} choose an input by part of its name and a pair (1 = 1-2); not remembered",
             "send": "{camera?, path?} send to the camera (the only one, or the one whose name contains the word); path wifi|tailscale forces one way",
             "stop": "{} stop sending", "permissions": "{} missing permissions",
-            "picture": "{source?, extra_ips?} the NDI sources and the chosen picture (frames, fps, motion)",
+            "picture": "{source?, extra_ips?, url?} the NDI sources and the chosen picture (frames, fps, format, state live/static/lost)",
             "stream": "{action start|stop, go_live?, seconds?, to?} one master to the VM ladder (STREAM)"]]
         if let d = try? JSONSerialization.data(withJSONObject: reg, options: [.prettyPrinted]) {
             try? d.write(to: URL(fileURLWithPath: dir + "/sound-link.json"))
@@ -99,7 +100,9 @@ final class Door {
         case "picture":
             let s = Studio.shared
             if let ips = a["extra_ips"] as? String { s.picture.extraIPs = ips }
-            if let want = (a["source"] as? String)?.lowercased(), !want.isEmpty {
+            if let url = a["url"] as? String, !url.isEmpty {         // an address typed by hand: no discovery
+                s.chooseManual(name: a["source"] as? String ?? "", url: url)
+            } else if let want = (a["source"] as? String)?.lowercased(), !want.isEmpty {
                 guard let src = s.sources.first(where: { $0.name.lowercased().contains(want) }) else { return ["ok": false, "error": "no NDI source named \(want)", "sources": s.sources.map(\.name)] }
                 s.choose(src.name, remember: false)
             }
