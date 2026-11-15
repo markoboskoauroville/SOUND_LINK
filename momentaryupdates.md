@@ -36,3 +36,7 @@
 "what is Mac Studio? I don't understand. If you're referring to my laptop, then call it MacBook Pro, and I don't have this thing at all."
 
 **Meaning (master):** the camera/device label "Mac Studio" is renamed "MacBook Pro" everywhere (studio.py, Picture.swift, TAKEOVER, manifest, band site TAKEOVER). Version v9.
+
+## 15.11.2026, NDI review fixes (mac23, word for word)
+
+"NDI review fixes (mac23, 15.11.2026): #1 accept BGRA/BGRX/UYVA besides UYVY and log skipped FourCC; #6 connect by source name, not the cached p_url_address; #8 NDIlib_framesync_* instead of the latest-frame variable; #9 ndi_probe.py no PICTURE STALL for send-on-change sources; no parentheses in NDI/source names."
